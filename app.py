@@ -7,6 +7,7 @@ from collections.abc import Callable
 from typing import Any, override
 
 import fluidsynth
+import keyboard
 import mido
 from PySide6.QtCore import QRect, QSize, QThread, Signal, Slot
 from PySide6.QtGui import QGuiApplication, QKeySequence, QShortcut, Qt
@@ -25,15 +26,18 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from wwm_macro import play_chord, play_note
+
 
 class Worker(QThread):
     """MIDI player worker."""
 
     progress: Signal = Signal(int)
 
-    def __init__(self, filename: str, soundfont: str) -> None:
+    def __init__(self, filename: str, soundfont: str, mode: str="audio") -> None:
         """Initialize worker."""
         super().__init__()
+        self.__mode: str = mode
         self.__filename: str = filename
         self.__soundfont: str = soundfont
         self.__running: bool = True
@@ -48,29 +52,47 @@ class Worker(QThread):
     @override
     def run(self) -> None:
         """Worker body."""
-        synth: fluidsynth.Synth = fluidsynth.Synth()
-        synth.start(driver="dsound")
-        soundfont_id: Any = synth.sfload(self.__soundfont)
-        synth.program_select(0, soundfont_id, 0, 0)
         player: mido.MidiFile = mido.MidiFile(self.__filename)
-        total: int = sum(len(track) for track in player.tracks)
         count: int = 0
-        for msg in player.play():
+        total: int = sum(len(track) for track in player.tracks)
+        synth: fluidsynth.Synth = fluidsynth.Synth()
+        if "audio" == self.__mode:
+            synth.start(driver="dsound")
+            soundfont_id: Any = synth.sfload(self.__soundfont)
+            synth.program_select(0, soundfont_id, 0, 0)
+        tempo: int = 500_000
+        events: list[tuple] = []
+        for track in player.tracks:
+            abs_time: int = 0
+            for msg in track:
+                abs_time += msg.time
+                if "set_tempo" == msg.type:
+                    tempo = msg.tempo
+                if not msg.is_meta:
+                    events.append((abs_time, msg))
+        events.sort(key=lambda e: e[0])
+        last_time: int = 0
+        for abs_time, msg in events:
             if not self.__running:
                 break
             while self.__paused and self.__running:
                 time.sleep(0.05)
-            synth.cc(0, 7, self.__volume)
-            if not msg.is_meta:
-                msg_type: str = msg.type
-                if "note_on" == msg_type:
-                    synth.noteon(msg.channel, msg.note, msg.velocity)
-                elif "note_off" == msg_type:
-                    synth.noteoff(msg.channel, msg.note)
-                elif "program_change" == msg_type:
-                    synth.program_select(msg.channel, soundfont_id, 0, msg.program)
+            delta_ticks: int = abs_time - last_time
+            if 0 < delta_ticks:
+                time.sleep(mido.tick2second(delta_ticks, player.ticks_per_beat, tempo))
+            last_time = abs_time
+            if "note_on" == msg.type and 0 < msg.velocity:
+                if "audio" == self.__mode:
+                    synth.noteon(0, msg.note, msg.velocity)
+                elif "wwm" == self.__mode:
+                    play_note(msg.note)
+            elif "note_off" == msg.type:
+                if "audio" == self.__mode:
+                    synth.noteoff(0, msg.note)
             count += 1
             self.progress.emit(int((count / total) * 100))
+            if "audio" == self.__mode:
+                synth.cc(0, 7, self.__volume)
         synth.delete()
 
     def stop(self) -> None:
@@ -123,9 +145,9 @@ class Player(QMainWindow):
 
     def __bind_shortcuts(self) -> None:
         """Bind shortcuts."""
-        QShortcut(QKeySequence("F9"), self, activated=self.__previous_on_click)
-        QShortcut(QKeySequence("F10"), self, activated=self.__play_on_click)
-        QShortcut(QKeySequence("F11"), self, activated=self.__next_on_click)
+        keyboard.add_hotkey("f9", self.__previous_on_click)
+        keyboard.add_hotkey("f10", self.__play_on_click)
+        keyboard.add_hotkey("f11", self.__next_on_click)
 
     def __playlist_on_double_click(self, item: QListWidgetItem) -> None:
         """Play track when double-clicked in playlist."""
@@ -200,7 +222,7 @@ class Player(QMainWindow):
 
     @Slot(int)
     def __update_progressbar(self, value: int) -> None:
-       """Update pprogressbar state."""
+       """Update progressbar state."""
        self.__progressbar.setValue(value)
 
     def __start_playback(self) -> None:
@@ -211,7 +233,7 @@ class Player(QMainWindow):
         filename: str = self.__files[self.__current_index]
         self.__current.setText(f"Playing: {filename}")
         self.__play.setText("Pause")
-        self.__thread = Worker(filename, self.__soundfont)
+        self.__thread = Worker(filename, self.__soundfont, "wwm")
         self.__thread.progress.connect(self.__update_progressbar)
         self.__thread.finished.connect(lambda: self.__play.setText("Play"))
         self.__thread.start()
@@ -237,7 +259,7 @@ class Player(QMainWindow):
         return button
 
     def __construct_upper_section(self) -> QHBoxLayout:
-        """Construc upper section."""
+        """Construct upper section."""
         layout: QHBoxLayout = QHBoxLayout()
         layout.addWidget(self.__construct_button("Browse MIDI Files", self.__browse_on_click))
         layout.addWidget(self.__construct_button("Save Playlist", self.__save_playlist))
@@ -245,7 +267,7 @@ class Player(QMainWindow):
         return layout
 
     def __construct_volume_slider(self) -> QHBoxLayout:
-        """Coonstruct volume slider."""
+        """Construct volume slider."""
         layout: QHBoxLayout = QHBoxLayout()
         volume: QSlider = QSlider(Qt.Orientation.Horizontal)
         volume.setRange(0, 127)
