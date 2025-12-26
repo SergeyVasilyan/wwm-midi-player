@@ -3,16 +3,27 @@
 import os
 import sys
 import time
-from typing import Any, Callable, override
-from PySide6.QtGui import QGuiApplication, QKeySequence, QShortcut, Qt
-import mido
-import fluidsynth
+from collections.abc import Callable
+from typing import Any, override
 
-from PySide6.QtWidgets import (
-    QApplication, QListWidget, QListWidgetItem, QMainWindow, QProgressBar, QPushButton, QSlider, QVBoxLayout,
-    QWidget, QFileDialog, QLabel, QHBoxLayout
-)
+import fluidsynth
+import mido
 from PySide6.QtCore import QRect, QSize, QThread, Signal, Slot
+from PySide6.QtGui import QGuiApplication, QKeySequence, QShortcut, Qt
+from PySide6.QtWidgets import (
+    QApplication,
+    QFileDialog,
+    QHBoxLayout,
+    QLabel,
+    QListWidget,
+    QListWidgetItem,
+    QMainWindow,
+    QProgressBar,
+    QPushButton,
+    QSlider,
+    QVBoxLayout,
+    QWidget,
+)
 
 
 class Worker(QThread):
@@ -22,7 +33,6 @@ class Worker(QThread):
 
     def __init__(self, filename: str, soundfont: str) -> None:
         """Initialize worker."""
-
         super().__init__()
         self.__filename: str = filename
         self.__soundfont: str = soundfont
@@ -68,7 +78,7 @@ class Worker(QThread):
         self.__running = False
 
     def toggle_pause(self) -> None:
-        """Pause worker"""
+        """Pause worker."""
         self.__paused = not self.__paused
 
     def set_volume(self, volume: int) -> None:
@@ -136,7 +146,7 @@ class Player(QMainWindow):
         filename, _ = QFileDialog.getOpenFileName(self, "Load Playlist", "", "Playlist (*.m3u)")
         if not filename:
             return
-        with open(filename, "r", encoding="utf-8") as f:
+        with open(filename, encoding="utf-8") as f:
             self.__files = [line.strip() for line in f if line.strip()]
         self.__playlist.clear()
         for path in self.__files:
