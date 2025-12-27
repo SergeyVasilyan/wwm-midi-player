@@ -57,6 +57,28 @@ class Worker(QThread):
         elif "note_off" == msg.type and self.__is_audio:
             synth.noteoff(0, msg.note)
 
+    def __flush_tick_events(self, synth: fluidsynth.Synth, tick_events: list[mido.Message],
+                                  count: int, total: int) -> int:
+        """Flush tick events."""
+        if not tick_events:
+            return count
+        chord_notes: list[int] = []
+        velocities: list[int] = []
+        for msg in tick_events:
+            self.__add_note(synth, msg, chord_notes, velocities)
+        if chord_notes:
+            if self.__is_audio:
+                chord_velocity: int = max(velocities) if velocities else 64
+                for n in chord_notes:
+                    synth.noteon(0, n, chord_velocity)
+                synth.cc(0, 7, self.__volume)
+            else:
+                play_chord(chord_notes)
+            count += len(chord_notes)
+            self.progress.emit(int((count / total) * 100))
+        tick_events.clear()
+        return count
+
     @override
     def run(self) -> None:
         """Worker body with proper chord grouping and tempo handling."""
@@ -67,38 +89,25 @@ class Worker(QThread):
         if self.__is_audio:
             synth.start(driver="dsound")
             synth.program_select(0, synth.sfload(self.__soundfont), 0, 0)
-        ticks_per_beat: int = player.ticks_per_beat
-        tempo: int = 500_000
-        merged: list[mido.Message] = mido.merge_tracks(player.tracks)
-        i: int = 0
-        while i < len(merged) and self.__running:
+        tick_events: list[mido.Message] = []
+        start_time: float = time.perf_counter()
+        for msg in player.play():
             while self.__paused and self.__running:
                 time.sleep(0.05)
-            msg: mido.Message = merged[i]
-            if "set_tempo" == msg.type:
-                tempo = msg.tempo
-            if 0 < msg.time:
-                if seconds := mido.tick2second(msg.time, ticks_per_beat, tempo):
-                    time.sleep(seconds)
-            chord_notes: list[int] = []
-            velocities: list[int] = []
-            self.__add_note(synth, msg, chord_notes, velocities)
-            i += 1
-            while i < len(merged) and 0 == merged[i].time:
-                m: mido.Message = merged[i]
-                self.__add_note(synth, m, chord_notes, velocities)
-                i += 1
-            if chord_notes:
-                chord_velocity = max(velocities) if velocities else 64
-                if self.__is_audio:
-                    for n in chord_notes:
-                        synth.noteon(0, n, chord_velocity)
-                else:
-                    play_chord(chord_notes)
-                count += len(chord_notes)
-                self.progress.emit(int((count / total) * 100))
+            if not self.__running:
+                break
+            target: float = start_time + msg.time
+            while True:
+                now: float = time.perf_counter()
+                if now >= target:
+                    break
+                time.sleep(min(0.001, target - now))
+            if msg.type in ("note_on", "note_off"):
+                tick_events.append(msg)
+            count = self.__flush_tick_events(synth, tick_events, count, total)
             if self.__is_audio:
                 synth.cc(0, 7, self.__volume)
+        self.__flush_tick_events(synth, tick_events, count, total)
         synth.delete()
 
     def stop(self) -> None:
