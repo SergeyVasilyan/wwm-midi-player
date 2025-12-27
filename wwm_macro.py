@@ -73,9 +73,7 @@ def play_note(note: int) -> None:
     if key := NOTE_TO_WWM_KEY.get(transpose_into_range(note)):
         keyboard.send(key.lower())
 
-def play_chord(notes: list[int], velocity: int) -> None:
+def play_chord(notes: list[int]) -> None:
     """Play chord."""
-    roll_delay: float = max(0.01, 0.1 - (velocity / 127.0) * 0.08)
     for n in notes:
         play_note(n)
-        time.sleep(roll_delay)
