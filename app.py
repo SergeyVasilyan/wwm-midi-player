@@ -10,9 +10,10 @@ import fluidsynth
 import keyboard
 import mido
 from PySide6.QtCore import QRect, QSize, QThread, Signal, Slot
-from PySide6.QtGui import QGuiApplication, Qt
+from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPaintEvent, Qt
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -28,15 +29,50 @@ from PySide6.QtWidgets import (
 from wwm_macro import play_chord
 
 
+class ToggleSwitch(QCheckBox):
+    """Modern Toggle Switch in WWM style."""
+
+    def __init__(self, parent: QWidget|None=None) -> None:
+        """Initialize toggle."""
+        super().__init__(parent=parent)
+        self.setChecked(False)
+        self.setStyleSheet("""
+            QCheckBox {
+                spacing: 8px;
+            }
+        """)
+
+    @override
+    def sizeHint(self) -> QSize:
+        """Override size hint."""
+        return QSize(40, 25)
+
+    @override
+    def paintEvent(self, _event: QPaintEvent) -> None:
+        """Override paint event."""
+        knob_size: int = 18
+        knob_offset: int = 2
+        painter: QPainter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        track_rect: QRect = QRect(0, 0, self.width(), self.height())
+        painter.setBrush(QColor("#2E7D32") if self.isChecked() else QColor("#8D6E63"))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(track_rect, 12, 12)
+        knob_x: int = self.width() - knob_size - knob_offset if self.isChecked() else knob_offset
+        knob_rect = QRect(knob_x, ((self.height() // 2) - (knob_size // 2)), knob_size, knob_size)
+        painter.setBrush(QColor("#FFFFFF"))
+        painter.drawEllipse(knob_rect)
+        painter.end()
+
 class Worker(QThread):
     """MIDI player worker."""
 
     progress: Signal = Signal(int)
 
-    def __init__(self, filename: str, soundfont: str, mode: str="audio") -> None:
+    def __init__(self, filename: str, soundfont: str, is_audio: bool=False) -> None:
         """Initialize worker."""
         super().__init__()
-        self.__is_audio: bool = "audio" == mode
+        self.__is_audio: bool = is_audio
         self.__filename: str = filename
         self.__soundfont: str = soundfont
         self.__running: bool = True
@@ -155,6 +191,7 @@ class Player(QMainWindow):
         self.__playlist.itemDoubleClicked.connect(self.__playlist_on_double_click)
         self.__play: QPushButton
         self.__progressbar: QProgressBar
+        self.__mode_toggle: ToggleSwitch
         self.__construct_layout()
         self.__bind_shortcuts()
 
@@ -163,6 +200,7 @@ class Player(QMainWindow):
         keyboard.add_hotkey("f9", self.__previous_on_click)
         keyboard.add_hotkey("f10", self.__play_on_click)
         keyboard.add_hotkey("f11", self.__next_on_click)
+        keyboard.add_hotkey("f8", self.__mode_toggle.toggle)
 
     def __playlist_on_double_click(self, item: QListWidgetItem) -> None:
         """Play track when double-clicked in playlist."""
@@ -218,9 +256,9 @@ class Player(QMainWindow):
         if self.__thread and self.__thread.isRunning():
             self.__thread.toggle_pause()
             if self.__thread.paused:
-                self.__play.setText("Resume")
+                self.__play.setText("Resume (F10)")
             else:
-                self.__play.setText("Pause")
+                self.__play.setText("Pause (F10)")
         else:
             self.__start_playback()
 
@@ -247,10 +285,13 @@ class Player(QMainWindow):
             self.__thread.wait()
         filename: str = self.__files[self.__current_index]
         self.__current.setText(f"Playing: {filename}")
-        self.__play.setText("Pause")
-        self.__thread = Worker(filename, self.__soundfont, "wwm")
+        self.__play.setText("Pause (F10)")
+        is_audio: bool = self.__mode_toggle.isChecked()
+        self.__thread = Worker(filename, self.__soundfont, is_audio)
         self.__thread.progress.connect(self.__update_progressbar)
-        self.__thread.finished.connect(lambda: self.__play.setText("Play"))
+        self.__thread.finished.connect(lambda: self.__play.setText("Play (F10)"))
+        if not is_audio:
+            time.sleep(1)
         self.__thread.start()
         self.__playlist.setCurrentRow(self.__current_index)
 
@@ -315,6 +356,16 @@ class Player(QMainWindow):
         layout.addWidget(volume)
         return layout
 
+    def __construct_mode_toggle(self) -> QHBoxLayout:
+        """Construct mode toggle."""
+        layout: QHBoxLayout = QHBoxLayout()
+        self.__mode_toggle = ToggleSwitch()
+        self.__mode_toggle.setChecked(False)
+        layout.addWidget(QLabel("WWM"))
+        layout.addWidget(self.__mode_toggle, stretch=1)
+        layout.addWidget(QLabel("Audio"))
+        return layout
+
     def __construct_track(self) -> QHBoxLayout:
         """Construct track section."""
         layout: QHBoxLayout = QHBoxLayout()
@@ -337,10 +388,10 @@ class Player(QMainWindow):
                     stop:0 #2E7D32, stop:1 #C0A060
                 );
             }
-
         """)
         layout.addWidget(self.__progressbar, stretch=1)
         layout.addLayout(self.__construct_volume_slider())
+        layout.addLayout(self.__construct_mode_toggle())
         return layout
 
     def __construct_controls(self) -> QHBoxLayout:
