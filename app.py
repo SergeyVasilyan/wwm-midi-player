@@ -10,7 +10,7 @@ import fluidsynth
 import keyboard
 import mido
 from PySide6.QtCore import QRect, QSize, QThread, Signal, Slot
-from PySide6.QtGui import QGuiApplication, Qt
+from PySide6.QtGui import QAction, QGuiApplication, Qt
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -19,6 +19,9 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidgetItem,
     QMainWindow,
+    QMenu,
+    QMenuBar,
+    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -143,6 +146,7 @@ class Player(QMainWindow):
         self.__play: PlayButton
         self.__progressbar: ProgressBar = ProgressBar()
         self.__mode_toggle: ToggleSwitch = ToggleSwitch()
+        self.__construct_menu_bar()
         self.__construct_layout()
         self.__bind_shortcuts()
 
@@ -242,6 +246,10 @@ class Player(QMainWindow):
             time.sleep(1)
         self.__thread.start()
 
+    def __show_about(self):
+        QMessageBox.information(self, "About",
+                                "Windows MIDI Player for WWM\nBuilt with PySide6 + FluidSynth")
+
     def __construct_button(self, text: str, callback: Callable, key: str="") -> QVBoxLayout:
         """Construct button."""
         layout: QVBoxLayout = QVBoxLayout()
@@ -262,13 +270,50 @@ class Player(QMainWindow):
             layout.addWidget(QLabel(f"[{key}]"), alignment=Qt.AlignmentFlag.AlignCenter)
         return layout
 
-    def __construct_upper_section(self) -> QHBoxLayout:
-        """Construct upper section."""
-        layout: QHBoxLayout = QHBoxLayout()
-        layout.addLayout(self.__construct_button("Browse MIDI Files", self.__browse_on_click))
-        layout.addLayout(self.__construct_button("Save Playlist", self.__save_playlist))
-        layout.addLayout(self.__construct_button("Load Playlist", self.__load_playlist))
-        return layout
+    def __construct_file_menu(self) -> None:
+        """Construct file menu."""
+        menu_bar: QMenuBar = self.menuBar()
+        menu: QMenu = menu_bar.addMenu("&File")
+        open_action: QAction = QAction("Open MIDI file", self)
+        save_action: QAction = QAction("Save Playlist", self)
+        load_action: QAction = QAction("Load Playlist", self)
+        exit_action: QAction = QAction("Exit", self)
+        open_action.triggered.connect(self.__browse_on_click)
+        save_action.triggered.connect(self.__save_playlist)
+        load_action.triggered.connect(self.__load_playlist)
+        exit_action.triggered.connect(self.close)
+        menu.addAction(open_action)
+        menu.addAction(save_action)
+        menu.addAction(load_action)
+        menu.addAction(exit_action)
+
+    def __construct_playback_menu(self) -> None:
+        """Construct playback menu."""
+        menu_bar: QMenuBar = self.menuBar()
+        menu: QMenu = menu_bar.addMenu("&Playback")
+        previous_action: QAction = QAction("Previous", self)
+        play_action: QAction = QAction("Play/Pause", self)
+        next_action: QAction = QAction("Next", self)
+        previous_action.triggered.connect(self.__previous_on_click)
+        play_action.triggered.connect(self.__play_on_click)
+        next_action.triggered.connect(self.__next_on_click)
+        menu.addAction(previous_action)
+        menu.addAction(play_action)
+        menu.addAction(next_action)
+
+    def __construct_help_menu(self) -> None:
+        """Construct help menu."""
+        menu_bar: QMenuBar = self.menuBar()
+        menu: QMenu = menu_bar.addMenu("&Help")
+        about_action: QAction = QAction("About", self)
+        about_action.triggered.connect(self.__show_about)
+        menu.addAction(about_action)
+
+    def __construct_menu_bar(self) -> None:
+        """Construct menu bar."""
+        self.__construct_file_menu()
+        self.__construct_playback_menu()
+        self.__construct_help_menu()
 
     def __construct_volume_slider(self) -> QHBoxLayout:
         """Construct volume slider."""
@@ -320,7 +365,6 @@ class Player(QMainWindow):
         widget: QWidget = QWidget()
         self.setCentralWidget(widget)
         layout: QVBoxLayout = QVBoxLayout(widget)
-        layout.addLayout(self.__construct_upper_section())
         layout.addWidget(self.__playlist)
         layout.addWidget(self.__progressbar)
         layout.addLayout(self.__construct_controls())
