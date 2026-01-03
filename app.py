@@ -10,14 +10,12 @@ import fluidsynth
 import keyboard
 import mido
 from PySide6.QtCore import QRect, QSize, QThread, Signal, Slot
-from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPaintEvent, Qt
+from PySide6.QtGui import QGuiApplication, Qt
 from PySide6.QtWidgets import (
     QApplication,
-    QCheckBox,
     QFileDialog,
     QHBoxLayout,
     QLabel,
-    QListWidget,
     QListWidgetItem,
     QMainWindow,
     QProgressBar,
@@ -26,48 +24,15 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from wwm_macro import play_chord
+from src.ui.playlist import PlayList
+from src.ui.toggle_switch import ToggleSwitch
+from src.utils.wwm_macro import play_chord
 
-
-class ToggleSwitch(QCheckBox):
-    """Modern Toggle Switch in WWM style."""
-
-    def __init__(self, parent: QWidget|None=None) -> None:
-        """Initialize toggle."""
-        super().__init__(parent=parent)
-        self.setChecked(False)
-        self.setStyleSheet("""
-            QCheckBox {
-                spacing: 8px;
-            }
-        """)
-
-    @override
-    def sizeHint(self) -> QSize:
-        """Override size hint."""
-        return QSize(40, 25)
-
-    @override
-    def paintEvent(self, _event: QPaintEvent) -> None:
-        """Override paint event."""
-        knob_size: int = 18
-        knob_offset: int = 2
-        painter: QPainter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        track_rect: QRect = QRect(0, 0, self.width(), self.height())
-        painter.setBrush(QColor("#2E7D32") if self.isChecked() else QColor("#8D6E63"))
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawRoundedRect(track_rect, 12, 12)
-        knob_x: int = self.width() - knob_size - knob_offset if self.isChecked() else knob_offset
-        knob_rect = QRect(knob_x, ((self.height() // 2) - (knob_size // 2)), knob_size, knob_size)
-        painter.setBrush(QColor("#FFFFFF"))
-        painter.drawEllipse(knob_rect)
-        painter.end()
 
 class Worker(QThread):
     """MIDI player worker."""
 
-    progress: Signal = Signal(int)
+    progress: Signal = Signal(int, int)
 
     def __init__(self, filename: str, soundfont: str, is_audio: bool=False) -> None:
         """Initialize worker."""
@@ -93,11 +58,10 @@ class Worker(QThread):
         elif "note_off" == msg.type and self.__is_audio:
             synth.noteoff(0, msg.note)
 
-    def __flush_tick_events(self, synth: fluidsynth.Synth, tick_events: list[mido.Message],
-                                  count: int, total: int) -> int:
+    def __flush_tick_events(self, synth: fluidsynth.Synth, tick_events: list[mido.Message]) -> None:
         """Flush tick events."""
         if not tick_events:
-            return count
+            return
         chord_notes: list[int] = []
         velocities: list[int] = []
         for msg in tick_events:
@@ -110,28 +74,25 @@ class Worker(QThread):
                 synth.cc(0, 7, self.__volume)
             else:
                 play_chord(chord_notes)
-            count += len(chord_notes)
-            self.progress.emit(int((count / total) * 100))
         tick_events.clear()
-        return count
 
     @override
     def run(self) -> None:
         """Worker body with proper chord grouping and tempo handling."""
         player: mido.MidiFile = mido.MidiFile(self.__filename)
         total: int = sum(len(track) for track in player.tracks)
-        count: int = 0
         synth: fluidsynth.Synth = fluidsynth.Synth()
         if self.__is_audio:
             synth.start(driver="dsound")
             synth.program_select(0, synth.sfload(self.__soundfont), 0, 0)
         tick_events: list[mido.Message] = []
         start_time: float = time.perf_counter()
-        for msg in player.play():
+        for count, msg in enumerate(player.play()):
             while self.__paused and self.__running:
                 time.sleep(0.05)
             if not self.__running:
                 break
+            self.progress.emit(total, count)
             target: float = start_time + msg.time
             while True:
                 now: float = time.perf_counter()
@@ -140,10 +101,11 @@ class Worker(QThread):
                 time.sleep(min(0.001, target - now))
             if msg.type in ("note_on", "note_off"):
                 tick_events.append(msg)
-            count = self.__flush_tick_events(synth, tick_events, count, total)
+            self.__flush_tick_events(synth, tick_events)
             if self.__is_audio:
                 synth.cc(0, 7, self.__volume)
-        self.__flush_tick_events(synth, tick_events, count, total)
+        self.__flush_tick_events(synth, tick_events)
+        self.progress.emit(total, total)
         synth.delete()
 
     def stop(self) -> None:
@@ -172,22 +134,7 @@ class Player(QMainWindow):
         self.__thread: Worker|None = None
         self.__soundfont: str = "GeneralUser.sf2"
         self.__current: QLabel = QLabel("No files loaded")
-        self.__playlist: QListWidget = QListWidget()
-        self.__playlist.setStyleSheet("""
-            QListWidget {
-                background-color: #1A1A1A;
-                color: #E0E0E0;
-                border: 1px solid #8D6E63;
-                font-size: 14px;
-            }
-            QListWidget::item {
-                padding: 6px;
-            }
-            QListWidget::item:selected {
-                background-color: #2E7D32;
-                color: #FFFFFF;
-            }
-        """)
+        self.__playlist: PlayList = PlayList()
         self.__playlist.itemDoubleClicked.connect(self.__playlist_on_double_click)
         self.__play: QPushButton
         self.__progressbar: QProgressBar
@@ -273,10 +220,11 @@ class Player(QMainWindow):
         if self.__thread and self.__thread.isRunning():
             self.__thread.set_volume(value)
 
-    @Slot(int)
-    def __update_progressbar(self, value: int) -> None:
+    @Slot(int, int)
+    def __update_progressbar(self, total: int, current: int) -> None:
        """Update progressbar state."""
-       self.__progressbar.setValue(value)
+       self.__progressbar.setMaximum(total)
+       self.__progressbar.setValue(current)
 
     def __start_playback(self) -> None:
         """Start playback."""
