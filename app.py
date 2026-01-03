@@ -9,7 +9,7 @@ from typing import override
 import fluidsynth
 import keyboard
 import mido
-from PySide6.QtCore import QRect, QSize, QThread, Signal, Slot
+from PySide6.QtCore import QRect, QSize, QThread, QTimer, Signal, Slot
 from PySide6.QtGui import QAction, QGuiApplication, Qt
 from PySide6.QtWidgets import (
     QApplication,
@@ -39,11 +39,12 @@ from src.utils.wwm_macro import play_chord
 class Worker(QThread):
     """MIDI player worker."""
 
-    progress: Signal = Signal(int, int)
+    duration_ready: Signal = Signal(float)
 
     def __init__(self, filename: str, soundfont: str, is_audio: bool=False) -> None:
         """Initialize worker."""
         super().__init__()
+        self.__error: bool = False
         self.__is_audio: bool = is_audio
         self.__filename: str = filename
         self.__soundfont: str = soundfont
@@ -55,6 +56,61 @@ class Worker(QThread):
     def paused(self) -> bool:
         """Return pause state."""
         return self.__paused
+
+    @property
+    def error(self) -> bool:
+        """Return error state."""
+        return self.__error
+
+    def __build_tempo_map(self, midi: mido.MidiFile) -> list[tuple[int, int]]:
+        """Return a list of (abs_tick, tempo_microsec_per_beat), sorted by abs_tick.
+
+        Default tempo is 500_000 (120 BPM). Tempo messages are taken from all tracks,
+        but commonly live in track 0.
+        """
+        tempo_map: list[tuple[int, int]] = [(0, 500_000)]
+        for track in midi.tracks:
+            abs_ticks: int = 0
+            for msg in track:
+                abs_ticks += msg.time
+                if "set_tempo" == msg.type:
+                    tempo_map.append((abs_ticks, msg.tempo))
+        tempo_map.sort(key=lambda x: x[0])
+        return tempo_map
+
+    def __ticks_to_seconds(self, abs_ticks: int, tempo_map: list[tuple[int, int]],
+                                 ticks_per_beat: int) -> float:
+        """Convert an absolute tick position to seconds by walking the tempo segments."""
+        total_seconds: float = 0.0
+        previous_tick: int = 0
+        previous_tempo: int = tempo_map[0][1]
+        for tick, tempo in tempo_map[1:]:
+            segment_end: int = min(abs_ticks, tick)
+            if segment_end > previous_tick:
+                segment_ticks: int = segment_end - previous_tick
+                total_seconds += mido.tick2second(segment_ticks, ticks_per_beat, previous_tempo)
+                previous_tick = segment_end
+            if abs_ticks <= tick:
+                return total_seconds
+            previous_tempo = tempo
+        if abs_ticks > previous_tick:
+            segment_ticks: int = abs_ticks - previous_tick
+            total_seconds += mido.tick2second(segment_ticks, ticks_per_beat, previous_tempo)
+        return total_seconds
+
+    def __calculate_duration(self) -> None:
+        """Calculate overall duration."""
+        midi: mido.MidiFile = mido.MidiFile(self.__filename)
+        tempo_map: list[tuple[int, int]] = self.__build_tempo_map(midi)
+        ticks_per_beat: int = midi.ticks_per_beat
+        track_end_ticks: list[int] = []
+        for track in midi.tracks:
+            abs_ticks: int = 0
+            for msg in track:
+                abs_ticks += msg.time
+            track_end_ticks.append(abs_ticks)
+        max_end_ticks: int = max(track_end_ticks) if track_end_ticks else 0
+        self.duration_ready.emit(self.__ticks_to_seconds(max_end_ticks, tempo_map, ticks_per_beat))
 
     def __add_note(self, synth: fluidsynth.Synth, msg: mido.Message, chord_notes: list[int],
                          velocities: list[int]) -> None:
@@ -86,20 +142,24 @@ class Worker(QThread):
     @override
     def run(self) -> None:
         """Worker body with proper chord grouping and tempo handling."""
-        player: mido.MidiFile = mido.MidiFile(self.__filename)
-        total: int = sum(len(track) for track in player.tracks)
+        self.__error = False
+        try:
+            player: mido.MidiFile = mido.MidiFile(self.__filename)
+        except mido.midifiles.meta.KeySignatureError:
+            self.__error = True
+            return
         synth: fluidsynth.Synth = fluidsynth.Synth()
         if self.__is_audio:
             synth.start(driver="dsound")
             synth.program_select(0, synth.sfload(self.__soundfont), 0, 0)
         tick_events: list[mido.Message] = []
         start_time: float = time.perf_counter()
-        for count, msg in enumerate(player.play()):
+        self.__calculate_duration()
+        for msg in player.play():
             while self.__paused and self.__running:
                 time.sleep(0.05)
             if not self.__running:
                 break
-            self.progress.emit(total, count)
             target: float = start_time + msg.time
             while True:
                 now: float = time.perf_counter()
@@ -112,7 +172,6 @@ class Worker(QThread):
             if self.__is_audio:
                 synth.cc(0, 7, self.__volume)
         self.__flush_tick_events(synth, tick_events)
-        self.progress.emit(total, total)
         synth.delete()
 
     def stop(self) -> None:
@@ -140,15 +199,25 @@ class Player(QMainWindow):
         self.__current_index: int = -1
         self.__thread: Worker|None = None
         self.__soundfont: str = "GeneralUser.sf2"
-        self.__current: QLabel = QLabel("No files loaded")
+        self.__file: QLabel = QLabel("No files loaded")
         self.__playlist: PlayList = PlayList()
         self.__playlist.itemDoubleClicked.connect(self.__playlist_on_double_click)
         self.__play: PlayButton
         self.__progressbar: ProgressBar = ProgressBar()
         self.__mode_toggle: ToggleSwitch = ToggleSwitch()
+        self.__current_time: QLabel = QLabel("00:00")
+        self.__duration_time: QLabel = QLabel("00:00")
+        self.__current: int = 0
+        self.__duration: int = 0
+        self.__progress_timer: QTimer
         self.__construct_menu_bar()
         self.__construct_layout()
         self.__bind_shortcuts()
+
+    @staticmethod
+    def __convert_to_mm_ss(seconds: int) -> tuple[int, int]:
+        """Convert seconds to humane format MM:SS."""
+        return divmod(seconds, 60)
 
     def __bind_shortcuts(self) -> None:
         """Bind shortcuts."""
@@ -156,6 +225,54 @@ class Player(QMainWindow):
         keyboard.add_hotkey("f10", self.__play_on_click)
         keyboard.add_hotkey("f11", self.__next_on_click)
         keyboard.add_hotkey("f8", self.__mode_toggle.toggle)
+
+    @Slot(float)
+    def __duration_ready(self, duration: float) -> None:
+        """Set duration and start timer."""
+        self.__current = 0
+        self.__duration = int(duration)
+        minutes, seconds = self.__convert_to_mm_ss(self.__duration)
+        self.__duration_time.setText(f"{minutes}:{seconds:02d}")
+        self.__progressbar.setMaximum(self.__duration)
+        try:
+            self.__progress_timer.stop()
+        except AttributeError:
+            ...
+        self.__progress_timer = QTimer(self)
+        self.__progress_timer.timeout.connect(self.__update_progress)
+        self.__progress_timer.start(1_000)
+
+    @Slot()
+    def __update_progress(self) -> None:
+        """Update progress."""
+        if self.__thread and self.__thread.paused:
+            return
+        self.__progressbar.setValue(self.__current)
+        minutes, seconds = self.__convert_to_mm_ss(self.__current)
+        self.__current_time.setText(f"{minutes}:{seconds:02d}")
+        if self.__current >= self.__duration:
+            self.__progress_timer.stop()
+            return
+        self.__current += 1
+
+    def __start_playback(self) -> None:
+        """Start playback."""
+        if self.__thread and self.__thread.isRunning():
+            self.__thread.stop()
+            self.__thread.wait()
+        self.__play.setChecked(True)
+        self.__playlist.setCurrentRow(self.__current_index)
+        is_audio: bool = self.__mode_toggle.isChecked()
+        self.__thread = Worker(self.__files[self.__current_index], self.__soundfont, is_audio)
+        self.__thread.duration_ready.connect(self.__duration_ready)
+        self.__thread.finished.connect(lambda: self.__play.setChecked(False))
+        if not is_audio:
+            time.sleep(1)
+        self.__thread.start()
+        if self.__thread.error:
+            self.__file.setText("Invalid file. Please select another one.")
+        else:
+            self.__file.setText(self.__playlist.currentItem().text())
 
     def __playlist_on_double_click(self, item: QListWidgetItem) -> None:
         """Play track when double-clicked in playlist."""
@@ -182,7 +299,7 @@ class Player(QMainWindow):
         for path in self.__files:
             self.__playlist.addItem(os.path.basename(path))
         self.__current_index = 0
-        self.__current.setText(f"Loaded playlist with {len(self.__files)} files.")
+        self.__file.setText(f"Loaded playlist with {len(self.__files)} files.")
 
     def __browse_on_click(self) -> None:
         """Browse button on click callback."""
@@ -195,7 +312,7 @@ class Player(QMainWindow):
         self.__playlist.clear()
         for f in files:
             self.__playlist.addItem(os.path.basename(f))
-        self.__current.setText(f"Loaded {len(files)} files. Ready to play.")
+        self.__file.setText(f"Loaded {len(files)} files. Ready to play.")
 
     def __previous_on_click(self) -> None:
         """Previous button on click callback."""
@@ -206,10 +323,11 @@ class Player(QMainWindow):
     def __play_on_click(self) -> None:
         """Play button on click callback."""
         if -1 == self.__current_index or not self.__files:
-            self.__current.setText("Please load MIDI files first!")
+            self.__file.setText("Please load MIDI files first!")
             self.__play.setChecked(False)
             return
         if self.__thread and self.__thread.isRunning():
+            self.__play.setChecked(self.__thread.paused)
             self.__thread.toggle_pause()
         else:
             self.__start_playback()
@@ -224,27 +342,6 @@ class Player(QMainWindow):
         """Adjust FluidSynth volume gain."""
         if self.__thread and self.__thread.isRunning():
             self.__thread.set_volume(value)
-
-    @Slot(int, int)
-    def __update_progressbar(self, total: int, current: int) -> None:
-       """Update progressbar state."""
-       self.__progressbar.setMaximum(total)
-       self.__progressbar.setValue(current)
-
-    def __start_playback(self) -> None:
-        """Start playback."""
-        if self.__thread and self.__thread.isRunning():
-            self.__thread.stop()
-            self.__thread.wait()
-        self.__playlist.setCurrentRow(self.__current_index)
-        self.__current.setText(self.__playlist.currentItem().text())
-        is_audio: bool = self.__mode_toggle.isChecked()
-        self.__thread = Worker(self.__files[self.__current_index], self.__soundfont, is_audio)
-        self.__thread.progress.connect(self.__update_progressbar)
-        self.__thread.finished.connect(lambda: self.__play.setChecked(False))
-        if not is_audio:
-            time.sleep(1)
-        self.__thread.start()
 
     def __show_about(self):
         QMessageBox.information(self, "About",
@@ -341,6 +438,15 @@ class Player(QMainWindow):
         layout.addLayout(self.__construct_mode_toggle())
         return widget
 
+    def __construct_track(self) -> QHBoxLayout:
+        """Construct track section."""
+        layout: QHBoxLayout = QHBoxLayout()
+        layout.addWidget(self.__progressbar, stretch=1)
+        layout.addWidget(self.__current_time, stretch=0)
+        layout.addWidget(QLabel("/"), stretch=0)
+        layout.addWidget(self.__duration_time, stretch=0)
+        return layout
+
     def __construct_controls(self) -> QGridLayout:
         """Construct player controls."""
         grid: QGridLayout = QGridLayout()
@@ -350,7 +456,7 @@ class Player(QMainWindow):
         layout.addLayout(self.__construct_button("Previous", self.__previous_on_click, key="F9"))
         layout.addLayout(self.__construct_button("Play", self.__play_on_click, key="F10"))
         layout.addLayout(self.__construct_button("Next", self.__next_on_click, key="F11"))
-        grid.addWidget(self.__current, 0, 0,
+        grid.addWidget(self.__file, 0, 0,
                         alignment=Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         grid.addWidget(widget, 0, 1, alignment=Qt.AlignmentFlag.AlignCenter)
         grid.addWidget(self.__construct_helpers(), 0, 2, alignment=Qt.AlignmentFlag.AlignRight)
@@ -366,7 +472,7 @@ class Player(QMainWindow):
         self.setCentralWidget(widget)
         layout: QVBoxLayout = QVBoxLayout(widget)
         layout.addWidget(self.__playlist)
-        layout.addWidget(self.__progressbar)
+        layout.addLayout(self.__construct_track())
         layout.addLayout(self.__construct_controls())
 
 if __name__ == "__main__":
