@@ -20,10 +20,12 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMainWindow,
     QPushButton,
-    QSlider,
     QVBoxLayout,
     QWidget,
 )
+from src.ui.buttons.next import NextButton
+from src.ui.buttons.play import PlayButton
+from src.ui.buttons.previous import PreviousButton
 from src.ui.playlist import PlayList
 from src.ui.progressbar import ProgressBar
 from src.ui.toggle_switch import ToggleSwitch
@@ -138,7 +140,7 @@ class Player(QMainWindow):
         self.__current: QLabel = QLabel("No files loaded")
         self.__playlist: PlayList = PlayList()
         self.__playlist.itemDoubleClicked.connect(self.__playlist_on_double_click)
-        self.__play: QPushButton
+        self.__play: PlayButton
         self.__progressbar: ProgressBar = ProgressBar()
         self.__mode_toggle: ToggleSwitch = ToggleSwitch()
         self.__construct_layout()
@@ -201,10 +203,10 @@ class Player(QMainWindow):
         """Play button on click callback."""
         if -1 == self.__current_index or not self.__files:
             self.__current.setText("Please load MIDI files first!")
+            self.__play.setChecked(False)
             return
         if self.__thread and self.__thread.isRunning():
             self.__thread.toggle_pause()
-            self.__play.setText("Resume" if self.__thread.paused else "Pause")
         else:
             self.__start_playback()
 
@@ -232,11 +234,10 @@ class Player(QMainWindow):
             self.__thread.wait()
         self.__playlist.setCurrentRow(self.__current_index)
         self.__current.setText(self.__playlist.currentItem().text())
-        self.__play.setText("Pause")
         is_audio: bool = self.__mode_toggle.isChecked()
         self.__thread = Worker(self.__files[self.__current_index], self.__soundfont, is_audio)
         self.__thread.progress.connect(self.__update_progressbar)
-        self.__thread.finished.connect(lambda: self.__play.setText("Play"))
+        self.__thread.finished.connect(lambda: self.__play.setChecked(False))
         if not is_audio:
             time.sleep(1)
         self.__thread.start()
@@ -245,23 +246,17 @@ class Player(QMainWindow):
         """Construct button."""
         layout: QVBoxLayout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
-        button: QPushButton = QPushButton(text)
-        button.clicked.connect(callback)
-        button.setStyleSheet("""
-            QPushButton {
-                background-color: #2E7D32;
-                border-radius: 6px;
-                color: #FFFFFF;
-                font-weight: bold;
-                padding: 6px 12px;
-            }
-            QPushButton:hover {
-                background-color: #C0A060;
-                color: #1A1A1A;
-            }
-        """)
-        if "Play" == text:
+        button: QPushButton
+        if "Next" == text:
+            button = NextButton()
+        elif "Previous" == text:
+            button = PreviousButton()
+        elif "Play" == text:
+            button = PlayButton()
             self.__play = button
+        else:
+           button = QPushButton(text)
+        button.clicked.connect(callback)
         layout.addWidget(button, alignment=Qt.AlignmentFlag.AlignCenter)
         if key:
             layout.addWidget(QLabel(f"[{key}]"), alignment=Qt.AlignmentFlag.AlignCenter)
@@ -311,7 +306,7 @@ class Player(QMainWindow):
         layout.addLayout(self.__construct_button("Play", self.__play_on_click, key="F10"))
         layout.addLayout(self.__construct_button("Next", self.__next_on_click, key="F11"))
         grid.addWidget(self.__current, 0, 0,
-                      alignment=Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+                        alignment=Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         grid.addWidget(widget, 0, 1, alignment=Qt.AlignmentFlag.AlignCenter)
         grid.addWidget(self.__construct_helpers(), 0, 2, alignment=Qt.AlignmentFlag.AlignRight)
         columns_count: int = grid.columnCount()
