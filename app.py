@@ -14,18 +14,20 @@ from PySide6.QtGui import QGuiApplication, Qt
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QListWidgetItem,
     QMainWindow,
-    QProgressBar,
     QPushButton,
     QSlider,
     QVBoxLayout,
     QWidget,
 )
 from src.ui.playlist import PlayList
+from src.ui.progressbar import ProgressBar
 from src.ui.toggle_switch import ToggleSwitch
+from src.ui.volume_slider import Volume
 from src.utils.wwm_macro import play_chord
 
 
@@ -137,8 +139,8 @@ class Player(QMainWindow):
         self.__playlist: PlayList = PlayList()
         self.__playlist.itemDoubleClicked.connect(self.__playlist_on_double_click)
         self.__play: QPushButton
-        self.__progressbar: QProgressBar
-        self.__mode_toggle: ToggleSwitch
+        self.__progressbar: ProgressBar = ProgressBar()
+        self.__mode_toggle: ToggleSwitch = ToggleSwitch()
         self.__construct_layout()
         self.__bind_shortcuts()
 
@@ -202,10 +204,7 @@ class Player(QMainWindow):
             return
         if self.__thread and self.__thread.isRunning():
             self.__thread.toggle_pause()
-            if self.__thread.paused:
-                self.__play.setText("Resume (F10)")
-            else:
-                self.__play.setText("Pause (F10)")
+            self.__play.setText("Resume" if self.__thread.paused else "Pause")
         else:
             self.__start_playback()
 
@@ -231,75 +230,56 @@ class Player(QMainWindow):
         if self.__thread and self.__thread.isRunning():
             self.__thread.stop()
             self.__thread.wait()
-        filename: str = self.__files[self.__current_index]
-        self.__current.setText(f"Playing: {filename}")
-        self.__play.setText("Pause (F10)")
+        self.__playlist.setCurrentRow(self.__current_index)
+        self.__current.setText(self.__playlist.currentItem().text())
+        self.__play.setText("Pause")
         is_audio: bool = self.__mode_toggle.isChecked()
-        self.__thread = Worker(filename, self.__soundfont, is_audio)
+        self.__thread = Worker(self.__files[self.__current_index], self.__soundfont, is_audio)
         self.__thread.progress.connect(self.__update_progressbar)
-        self.__thread.finished.connect(lambda: self.__play.setText("Play (F10)"))
+        self.__thread.finished.connect(lambda: self.__play.setText("Play"))
         if not is_audio:
             time.sleep(1)
         self.__thread.start()
-        self.__playlist.setCurrentRow(self.__current_index)
 
-    def __construct_button(self, text: str, callback: Callable) -> QPushButton:
+    def __construct_button(self, text: str, callback: Callable, key: str="") -> QVBoxLayout:
         """Construct button."""
+        layout: QVBoxLayout = QVBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
         button: QPushButton = QPushButton(text)
         button.clicked.connect(callback)
         button.setStyleSheet("""
             QPushButton {
                 background-color: #2E7D32;
-                color: #FFFFFF;
                 border-radius: 6px;
-                padding: 6px 12px;
+                color: #FFFFFF;
                 font-weight: bold;
+                padding: 6px 12px;
             }
             QPushButton:hover {
                 background-color: #C0A060;
                 color: #1A1A1A;
             }
         """)
-        return button
+        if "Play" == text:
+            self.__play = button
+        layout.addWidget(button, alignment=Qt.AlignmentFlag.AlignCenter)
+        if key:
+            layout.addWidget(QLabel(f"[{key}]"), alignment=Qt.AlignmentFlag.AlignCenter)
+        return layout
 
     def __construct_upper_section(self) -> QHBoxLayout:
         """Construct upper section."""
         layout: QHBoxLayout = QHBoxLayout()
-        layout.addWidget(self.__construct_button("Browse MIDI Files", self.__browse_on_click))
-        layout.addWidget(self.__construct_button("Save Playlist", self.__save_playlist))
-        layout.addWidget(self.__construct_button("Load Playlist", self.__load_playlist))
+        layout.addLayout(self.__construct_button("Browse MIDI Files", self.__browse_on_click))
+        layout.addLayout(self.__construct_button("Save Playlist", self.__save_playlist))
+        layout.addLayout(self.__construct_button("Load Playlist", self.__load_playlist))
         return layout
 
     def __construct_volume_slider(self) -> QHBoxLayout:
         """Construct volume slider."""
         layout: QHBoxLayout = QHBoxLayout()
-        volume: QSlider = QSlider(Qt.Orientation.Horizontal)
-        volume.setRange(0, 127)
-        volume.setValue(100)
+        volume: Volume = Volume()
         volume.valueChanged.connect(self.__set_volume)
-        volume.setStyleSheet("""
-            QSlider::groove:horizontal {
-                border: 1px solid #8D6E63;
-                height: 8px;
-                background: #1A1A1A;
-                border-radius: 4px;
-            }
-            QSlider::handle:horizontal {
-                background: #2E7D32;
-                border: 1px solid #C0A060;
-                width: 16px;
-                height: 16px;
-                margin: -4px 0;
-                border-radius: 8px;
-            }
-            QSlider::handle:horizontal:hover {
-                background: #C0A060;
-            }
-            QSlider::sub-page:horizontal {
-                background: #2E7D32;
-                border-radius: 4px;
-            }
-        """)
         layout.addWidget(QLabel("Volume"))
         layout.addWidget(volume)
         return layout
@@ -307,49 +287,38 @@ class Player(QMainWindow):
     def __construct_mode_toggle(self) -> QHBoxLayout:
         """Construct mode toggle."""
         layout: QHBoxLayout = QHBoxLayout()
-        self.__mode_toggle = ToggleSwitch()
-        self.__mode_toggle.setChecked(False)
         layout.addWidget(QLabel("WWM"))
         layout.addWidget(self.__mode_toggle, stretch=1)
         layout.addWidget(QLabel("Audio"))
         return layout
 
-    def __construct_track(self) -> QHBoxLayout:
-        """Construct track section."""
-        layout: QHBoxLayout = QHBoxLayout()
-        self.__progressbar = QProgressBar(minimum=0, maximum=100,
-                                          orientation=Qt.Orientation.Horizontal)
-        self.__progressbar.setStyleSheet("""
-            QProgressBar {
-                border: 1px solid #8D6E63;
-                border-radius: 10px;
-                text-align: center;
-                height: 24px;
-                background: #1A1A1A;
-                color: #E0E0E0;
-                font-weight: bold;
-            }
-            QProgressBar::chunk {
-                border-radius: 10px;
-                background: qlineargradient(
-                    spread:pad, x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #2E7D32, stop:1 #C0A060
-                );
-            }
-        """)
-        layout.addWidget(self.__progressbar, stretch=1)
+    def __construct_helpers(self) -> QWidget:
+        """Construct helper widgets."""
+        widget: QWidget = QWidget()
+        layout: QHBoxLayout = QHBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.addLayout(self.__construct_volume_slider())
         layout.addLayout(self.__construct_mode_toggle())
-        return layout
+        return widget
 
-    def __construct_controls(self) -> QHBoxLayout:
+    def __construct_controls(self) -> QGridLayout:
         """Construct player controls."""
-        self.__play = self.__construct_button("Play (F10)", self.__play_on_click)
-        layout: QHBoxLayout = QHBoxLayout()
-        layout.addWidget(self.__construct_button("Previous (F9)", self.__previous_on_click))
-        layout.addWidget(self.__play)
-        layout.addWidget(self.__construct_button("Next (F11)", self.__next_on_click))
-        return layout
+        grid: QGridLayout = QGridLayout()
+        widget: QWidget = QWidget()
+        layout: QHBoxLayout = QHBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addLayout(self.__construct_button("Previous", self.__previous_on_click, key="F9"))
+        layout.addLayout(self.__construct_button("Play", self.__play_on_click, key="F10"))
+        layout.addLayout(self.__construct_button("Next", self.__next_on_click, key="F11"))
+        grid.addWidget(self.__current, 0, 0,
+                      alignment=Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        grid.addWidget(widget, 0, 1, alignment=Qt.AlignmentFlag.AlignCenter)
+        grid.addWidget(self.__construct_helpers(), 0, 2, alignment=Qt.AlignmentFlag.AlignRight)
+        columns_count: int = grid.columnCount()
+        column_width: int = self.width() // columns_count
+        for column in range(columns_count):
+            grid.setColumnMinimumWidth(column, column_width)
+        return grid
 
     def __construct_layout(self) -> None:
         """Construct layout."""
@@ -358,8 +327,7 @@ class Player(QMainWindow):
         layout: QVBoxLayout = QVBoxLayout(widget)
         layout.addLayout(self.__construct_upper_section())
         layout.addWidget(self.__playlist)
-        layout.addWidget(self.__current)
-        layout.addLayout(self.__construct_track())
+        layout.addWidget(self.__progressbar)
         layout.addLayout(self.__construct_controls())
 
 if __name__ == "__main__":

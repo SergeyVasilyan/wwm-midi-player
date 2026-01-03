@@ -13,6 +13,7 @@ class ToggleSwitch(QCheckBox):
     def __init__(self, parent: QWidget|None=None) -> None:
         """Initialize toggle."""
         super().__init__(parent=parent)
+        self.setChecked(False)
         self.__checked_color: QColor = QColor("#2E7D32")
         self.__unchecked_color: QColor = QColor("#8D6E63")
         self.__knob_color: QColor = QColor("#FFFFFF")

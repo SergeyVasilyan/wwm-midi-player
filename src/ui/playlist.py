@@ -7,7 +7,7 @@ class PlayList(QListWidget):
     """Playlist widget.."""
 
     def __init__(self, parent: QWidget|None=None) -> None:
-        """Initialize toggle."""
+        """Initialize playlist."""
         super().__init__(parent=parent)
         self.set_style()
 
