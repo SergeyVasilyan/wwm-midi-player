@@ -1,6 +1,7 @@
 """Playlist widget."""
 
 from PySide6.QtWidgets import QListWidget, QWidget
+from src.utils.common import Colors
 
 
 class PlayList(QListWidget):
@@ -13,20 +14,20 @@ class PlayList(QListWidget):
 
     def set_style(self) -> None:
         """Override size hint."""
-        self.setStyleSheet("""
-            QListWidget {
+        self.setStyleSheet(f"""
+            QListWidget {{
                 background-color: #1A1A1A;
+                border: 1px solid {Colors.ACCENT_2.value.hex};
                 color: #E0E0E0;
-                border: 1px solid #8D6E63;
                 font-size: 14px;
-            }
-            QListWidget::item {
+            }}
+            QListWidget::item {{
                 padding: 6px;
-            }
-            QListWidget::item:selected {
-                background-color: #2E7D32;
+            }}
+            QListWidget::item:selected {{
+                background-color: {Colors.ACCENT_1.value.hex};
                 color: #FFFFFF;
-            }
+            }}
         """)
 
 if "__main__" == __name__:

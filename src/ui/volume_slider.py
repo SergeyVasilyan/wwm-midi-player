@@ -2,6 +2,7 @@
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QSlider, QWidget
+from src.utils.common import Colors
 
 
 class Volume(QSlider):
@@ -17,28 +18,28 @@ class Volume(QSlider):
 
     def set_style(self) -> None:
         """Override size hint."""
-        self.setStyleSheet("""
-            QSlider::groove:horizontal {
+        self.setStyleSheet(f"""
+            QSlider::groove:horizontal {{
                 background: #1A1A1A;
-                border: 1px solid #8D6E63;
+                border: 1px solid {Colors.ACCENT_2.value.hex};
                 border-radius: 4px;
                 height: 8px;
-            }
-            QSlider::handle:horizontal {
-                background: #2E7D32;
+            }}
+            QSlider::handle:horizontal {{
+                background: {Colors.ACCENT_1.value.hex};
                 border: 1px solid #C0A060;
                 border-radius: 8px;
                 width: 16px;
                 height: 16px;
                 margin: -4px 0;
-            }
-            QSlider::handle:horizontal:hover {
+            }}
+            QSlider::handle:horizontal:hover {{
                 background: #C0A060;
-            }
-            QSlider::sub-page:horizontal {
-                background: #2E7D32;
+            }}
+            QSlider::sub-page:horizontal {{
+                background: {Colors.ACCENT_1.value.hex};
                 border-radius: 4px;
-            }
+            }}
         """)
 
 if "__main__" == __name__:

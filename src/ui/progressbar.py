@@ -2,6 +2,7 @@
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QProgressBar, QWidget
+from src.utils.common import Colors
 
 
 class ProgressBar(QProgressBar):
@@ -18,20 +19,20 @@ class ProgressBar(QProgressBar):
 
     def set_style(self) -> None:
         """Override size hint."""
-        self.setStyleSheet("""
-            QProgressBar {
+        self.setStyleSheet(f"""
+            QProgressBar {{
                 background: #1A1A1A;
-                border: 1px solid #8D6E63;
+                border: 1px solid {Colors.ACCENT_2.value.hex};
                 border-radius: 3px;
                 height: 6px;
-            }
-            QProgressBar::chunk {
+            }}
+            QProgressBar::chunk {{
                 border-radius: 2px;
                 background: qlineargradient(
                     spread:pad, x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #2E7D32, stop:1 #C0A060
+                    stop:0 {Colors.ACCENT_1.value.hex}, stop:1 #C0A060
                 );
-            }
+            }}
         """)
 
 if "__main__" == __name__:

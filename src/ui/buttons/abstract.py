@@ -4,6 +4,7 @@
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QPushButton, QWidget
+from src.utils.common import Colors
 
 
 class AbstractButton(QPushButton):
@@ -14,7 +15,7 @@ class AbstractButton(QPushButton):
         super().__init__(parent=parent)
         self.setFixedSize(QSize(40, 30))
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._color: QColor = QColor("#2E7D32")
+        self._color: QColor = Colors.ACCENT_1.value.qcolor
         self.set_style()
 
     def set_style(self) -> None:

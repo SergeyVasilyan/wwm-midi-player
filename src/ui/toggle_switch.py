@@ -5,6 +5,7 @@ from typing import override
 from PySide6.QtCore import QRect, QSize, Qt
 from PySide6.QtGui import QColor, QPainter, QPaintEvent
 from PySide6.QtWidgets import QCheckBox, QWidget
+from src.utils.common import Colors
 
 
 class ToggleSwitch(QCheckBox):
@@ -14,8 +15,8 @@ class ToggleSwitch(QCheckBox):
         """Initialize toggle."""
         super().__init__(parent=parent)
         self.setChecked(False)
-        self.__checked_color: QColor = QColor("#2E7D32")
-        self.__unchecked_color: QColor = QColor("#8D6E63")
+        self.__checked_color: QColor = Colors.ACCENT_1.value.qcolor
+        self.__unchecked_color: QColor = Colors.ACCENT_2.value.qcolor
         self.__knob_color: QColor = QColor("#FFFFFF")
         self.__knob_size: int = 18
         self.__knob_offset: int = 2
