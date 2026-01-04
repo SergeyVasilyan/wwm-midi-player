@@ -13,6 +13,7 @@ class ProgressBar(QProgressBar):
         super().__init__(parent=parent)
         self.setMinimum(0)
         self.setMaximum(100)
+        self.setFixedHeight(6)
         self.setOrientation(Qt.Orientation.Horizontal)
         self.setTextVisible(False)
         self.set_style()
@@ -21,13 +22,12 @@ class ProgressBar(QProgressBar):
         """Override size hint."""
         self.setStyleSheet(f"""
             QProgressBar {{
-                background: #1A1A1A;
-                border: 1px solid {Colors.ACCENT_2.value.hex};
+                background: {Colors.BACKGROUND.value.hex};
+                border: none;
                 border-radius: 3px;
-                height: 6px;
             }}
             QProgressBar::chunk {{
-                border-radius: 2px;
+                border-radius: 3px;
                 background: qlineargradient(
                     spread:pad, x1:0, y1:0, x2:1, y2:0,
                     stop:0 {Colors.ACCENT_1.value.hex}, stop:1 #C0A060

@@ -16,17 +16,22 @@ class PlayList(QListWidget):
         """Override size hint."""
         self.setStyleSheet(f"""
             QListWidget {{
-                background-color: #1A1A1A;
-                border: 1px solid {Colors.ACCENT_2.value.hex};
+                background-color: {Colors.BACKGROUND.value.hex};
+                border: none;
                 color: #E0E0E0;
                 font-size: 14px;
             }}
             QListWidget::item {{
                 padding: 6px;
+                border-bottom: 1px solid #303030;
             }}
             QListWidget::item:selected {{
-                background-color: {Colors.ACCENT_1.value.hex};
-                color: #FFFFFF;
+                background-color: transparent;
+                border-left: 3px solid {Colors.ACCENT_1.value.hex};
+                color: #E0E0E0;
+            }}
+            QListWidget::item:hover {{
+                background-color: #2A2A2A;
             }}
         """)
 

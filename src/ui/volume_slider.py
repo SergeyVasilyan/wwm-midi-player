@@ -20,7 +20,7 @@ class Volume(QSlider):
         """Override size hint."""
         self.setStyleSheet(f"""
             QSlider::groove:horizontal {{
-                background: #1A1A1A;
+                background: {Colors.BACKGROUND.value.hex};
                 border: 1px solid {Colors.ACCENT_2.value.hex};
                 border-radius: 4px;
                 height: 8px;

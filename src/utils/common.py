@@ -24,3 +24,4 @@ class Colors(Enum):
 
     ACCENT_1 = Color("#2E7D32")
     ACCENT_2 = Color("#8D6E63")
+    BACKGROUND = Color("#111111")
