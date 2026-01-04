@@ -75,26 +75,42 @@ class Worker(QThread):
                 abs_ticks += msg.time
                 if "set_tempo" == msg.type:
                     tempo_map.append((abs_ticks, msg.tempo))
-        tempo_map.sort(key=lambda x: x[0])
-        return tempo_map
+        clean_tempo_map: dict[int, int] = {}
+        for tick, tempo in tempo_map:
+            clean_tempo_map[tick] = tempo
+        return sorted(clean_tempo_map.items())
 
-    def __ticks_to_seconds(self, abs_ticks: int, tempo_map: list[tuple[int, int]],
-                                 ticks_per_beat: int) -> float:
+    def __find_max_end_tick(self, midi: mido.MidiFile) -> int:
+        """Find max end tick value."""
+        max_end_tick: int = 0
+        for track in midi.tracks:
+            abs_ticks: int = 0
+            has_notes: bool = False
+            for msg in track:
+                abs_ticks += msg.time
+                if msg.type in ("note_on", "note_off"):
+                    has_notes = True
+            if has_notes:
+                max_end_tick = max(max_end_tick, abs_ticks)
+        return max_end_tick
+
+    def __ticks_to_seconds(self, midi: mido.MidiFile, max_end_tick: int,
+                                 tempo_map: list[tuple[int, int]]) -> float:
         """Convert an absolute tick position to seconds by walking the tempo segments."""
+        ticks_per_beat: int = midi.ticks_per_beat
         total_seconds: float = 0.0
-        previous_tick: int = 0
-        previous_tempo: int = tempo_map[0][1]
+        previous_tick, previous_tempo = tempo_map[0]
         for tick, tempo in tempo_map[1:]:
-            segment_end: int = min(abs_ticks, tick)
+            segment_end: int = min(max_end_tick, tick)
             if segment_end > previous_tick:
                 segment_ticks: int = segment_end - previous_tick
                 total_seconds += mido.tick2second(segment_ticks, ticks_per_beat, previous_tempo)
                 previous_tick = segment_end
-            if abs_ticks <= tick:
+            if max_end_tick <= tick:
                 return total_seconds
             previous_tempo = tempo
-        if abs_ticks > previous_tick:
-            segment_ticks: int = abs_ticks - previous_tick
+        if max_end_tick > previous_tick:
+            segment_ticks: int = max_end_tick - previous_tick
             total_seconds += mido.tick2second(segment_ticks, ticks_per_beat, previous_tempo)
         return total_seconds
 
@@ -102,15 +118,8 @@ class Worker(QThread):
         """Calculate overall duration."""
         midi: mido.MidiFile = mido.MidiFile(self.__filename)
         tempo_map: list[tuple[int, int]] = self.__build_tempo_map(midi)
-        ticks_per_beat: int = midi.ticks_per_beat
-        track_end_ticks: list[int] = []
-        for track in midi.tracks:
-            abs_ticks: int = 0
-            for msg in track:
-                abs_ticks += msg.time
-            track_end_ticks.append(abs_ticks)
-        max_end_ticks: int = max(track_end_ticks) if track_end_ticks else 0
-        self.duration_ready.emit(self.__ticks_to_seconds(max_end_ticks, tempo_map, ticks_per_beat))
+        max_end_tick: int = self.__find_max_end_tick(midi)
+        self.duration_ready.emit(self.__ticks_to_seconds(midi, max_end_tick, tempo_map))
 
     def __add_note(self, synth: fluidsynth.Synth, msg: mido.Message, chord_notes: list[int],
                          velocities: list[int]) -> None:
