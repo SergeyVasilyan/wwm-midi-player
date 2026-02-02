@@ -4,13 +4,14 @@ import os
 import sys
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import override
 
 import fluidsynth
 import keyboard
 import mido
 from PySide6.QtCore import QRect, QSize, QThread, QTimer, Signal, Slot
-from PySide6.QtGui import QAction, QGuiApplication, Qt
+from PySide6.QtGui import QAction, QGuiApplication, QIcon, Qt
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -201,7 +202,6 @@ class Player(QMainWindow):
     def __init__(self) -> None:
         """Initialize MIDI Player."""
         super().__init__()
-        self.setWindowTitle("Windows MIDI Player (FluidSynth)")
         screen_size: QRect = QGuiApplication.primaryScreen().availableGeometry()
         self.setMinimumSize(QSize(screen_size.width() // 2, screen_size.height() // 2))
         self.__files: list[str] = []
@@ -486,6 +486,11 @@ class Player(QMainWindow):
 
 if __name__ == "__main__":
     app: QApplication = QApplication(sys.argv)
+    app.setApplicationName("WWM MIDI Player")
+    icon: Path = Path("src/input/logo.ico")
+    if not icon.exists():
+        icon = "_internal" / icon
+    app.setWindowIcon(QIcon(icon.as_posix()))
     window: Player = Player()
     window.show()
     sys.exit(app.exec())

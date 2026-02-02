@@ -1,4 +1,4 @@
-pyside6
-mido
-pyfluidsynth
-keyboard
+pyside6>=6.10.0
+mido>=1.3.3
+pyfluidsynth>=1.3.4
+keyboard>=0.13.5
