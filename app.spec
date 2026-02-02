@@ -8,6 +8,7 @@ a = Analysis(
     datas=[
         ("src/input/logo.ico", "src/input"),
         ("LICENSE", "."),
+        ("GeneralUser.sf2", "."),
     ],
     hiddenimports=[],
     hookspath=[],

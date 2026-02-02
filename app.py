@@ -207,7 +207,9 @@ class Player(QMainWindow):
         self.__files: list[str] = []
         self.__current_index: int = -1
         self.__thread: Worker|None = None
-        self.__soundfont: str = "GeneralUser.sf2"
+        self.__soundfont: Path = Path("GeneralUser.sf2")
+        if not self.__soundfont.exists():
+            self.__soundfont = "_internal" / self.__soundfont
         self.__file: QLabel = QLabel("No files loaded")
         self.__playlist: PlayList = PlayList()
         self.__playlist.itemDoubleClicked.connect(self.__playlist_on_double_click)
@@ -272,7 +274,8 @@ class Player(QMainWindow):
         self.__play.setChecked(True)
         self.__playlist.setCurrentRow(self.__current_index)
         is_audio: bool = self.__mode_toggle.isChecked()
-        self.__thread = Worker(self.__files[self.__current_index], self.__soundfont, is_audio)
+        self.__thread = Worker(self.__files[self.__current_index], self.__soundfont.as_posix(),
+                               is_audio)
         self.__thread.duration_ready.connect(self.__duration_ready)
         self.__thread.finished.connect(lambda: self.__play.setChecked(False))
         if not is_audio:
