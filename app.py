@@ -7,9 +7,9 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import override
 
-import fluidsynth
 import keyboard
 import mido
+import tinysoundfont
 from PySide6.QtCore import QRect, QSize, QThread, QTimer, Signal, Slot
 from PySide6.QtGui import QAction, QGuiApplication, QIcon, Qt
 from PySide6.QtWidgets import (
@@ -122,7 +122,7 @@ class Worker(QThread):
         max_end_tick: int = self.__find_max_end_tick(midi)
         self.duration_ready.emit(self.__ticks_to_seconds(midi, max_end_tick, tempo_map))
 
-    def __add_note(self, synth: fluidsynth.Synth, msg: mido.Message, chord_notes: list[int],
+    def __add_note(self, synth: tinysoundfont.Synth, msg: mido.Message, chord_notes: list[int],
                          velocities: list[int]) -> None:
         """Add note details."""
         if "note_on" == msg.type and 0 < msg.velocity:
@@ -131,7 +131,8 @@ class Worker(QThread):
         elif "note_off" == msg.type and self.__is_audio:
             synth.noteoff(0, msg.note)
 
-    def __flush_tick_events(self, synth: fluidsynth.Synth, tick_events: list[mido.Message]) -> None:
+    def __flush_tick_events(self, synth: tinysoundfont.Synth,
+                                  tick_events: list[mido.Message]) -> None:
         """Flush tick events."""
         if not tick_events:
             return
@@ -144,7 +145,7 @@ class Worker(QThread):
                 chord_velocity: int = max(velocities) if velocities else 64
                 for n in chord_notes:
                     synth.noteon(0, n, chord_velocity)
-                synth.cc(0, 7, self.__volume)
+                synth.control_change(0, 7, self.__volume)
             else:
                 play_chord(chord_notes)
         tick_events.clear()
@@ -158,9 +159,9 @@ class Worker(QThread):
         except mido.midifiles.meta.KeySignatureError:
             self.__error = True
             return
-        synth: fluidsynth.Synth = fluidsynth.Synth()
+        synth: tinysoundfont.Synth = tinysoundfont.Synth()
         if self.__is_audio:
-            synth.start(driver="dsound")
+            synth.start()
             synth.program_select(0, synth.sfload(self.__soundfont), 0, 0)
         tick_events: list[mido.Message] = []
         start_time: float = time.perf_counter()
@@ -180,9 +181,9 @@ class Worker(QThread):
                 tick_events.append(msg)
             self.__flush_tick_events(synth, tick_events)
             if self.__is_audio:
-                synth.cc(0, 7, self.__volume)
+                synth.control_change(0, 7, self.__volume)
         self.__flush_tick_events(synth, tick_events)
-        synth.delete()
+        synth.stop()
 
     def stop(self) -> None:
         """Stop worker."""
