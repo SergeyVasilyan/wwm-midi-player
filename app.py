@@ -164,22 +164,31 @@ class Worker(QThread):
             synth.start()
             synth.program_select(0, synth.sfload(self.__soundfont), 0, 0)
         tick_events: list[mido.Message] = []
-        start_time: float = time.perf_counter()
         self.__calculate_duration()
-        for msg in player.play():
-            while self.__paused and self.__running:
-                time.sleep(0.05)
+        current_song_time: float = .0
+        start_time: float = time.perf_counter()
+        for msg in player:
             if not self.__running:
                 break
-            target: float = start_time + msg.time
-            while True:
-                now: float = time.perf_counter()
-                if now >= target:
+            if self.__paused:
+                if self.__is_audio:
+                    for i in range(16):
+                        synth.control_change(i, 123, 0)
+                pause_start: float = time.perf_counter()
+                while self.__paused and self.__running:
+                    time.sleep(0.05)
+                start_time += (time.perf_counter() - pause_start)
+            current_song_time += msg.time
+            while self.__running:
+                elapsed: float = (time.perf_counter() - start_time)
+                if elapsed >= current_song_time:
                     break
-                time.sleep(min(0.001, target - now))
+                time.sleep(min(0.001, current_song_time - elapsed))
             if msg.type in ("note_on", "note_off"):
-                tick_events.append(msg)
-            self.__flush_tick_events(synth, tick_events)
+                tick_events = [msg]
+                self.__flush_tick_events(synth, tick_events)
+            elif msg.type == "control_change" and self.__is_audio:
+                synth.control_change(0, msg.control, msg.value)
             if self.__is_audio:
                 synth.control_change(0, 7, self.__volume)
         self.__flush_tick_events(synth, tick_events)
