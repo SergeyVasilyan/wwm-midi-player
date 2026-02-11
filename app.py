@@ -34,18 +34,21 @@ from src.ui.playlist import PlayList
 from src.ui.progressbar import ProgressBar
 from src.ui.toggle_switch import ToggleSwitch
 from src.ui.volume_slider import Volume
-from src.utils.wwm_macro import play_chord
+from src.utils.wwm_macro import IS_WINDOWS, play_chord
+
+if IS_WINDOWS:
+    import win32gui
 
 
 class Worker(QThread):
     """MIDI player worker."""
 
     duration_ready: Signal = Signal(float)
+    error: Signal = Signal(str)
 
     def __init__(self, filename: str, soundfont: str, is_audio: bool=False) -> None:
         """Initialize worker."""
         super().__init__()
-        self.__error: bool = False
         self.__is_audio: bool = is_audio
         self.__filename: str = filename
         self.__soundfont: str = soundfont
@@ -57,11 +60,6 @@ class Worker(QThread):
     def paused(self) -> bool:
         """Return pause state."""
         return self.__paused
-
-    @property
-    def error(self) -> bool:
-        """Return error state."""
-        return self.__error
 
     def __build_tempo_map(self, midi: mido.MidiFile) -> list[tuple[int, int]]:
         """Return a list of (abs_tick, tempo_microsec_per_beat), sorted by abs_tick.
@@ -131,7 +129,7 @@ class Worker(QThread):
         elif "note_off" == msg.type and self.__is_audio:
             synth.noteoff(0, msg.note)
 
-    def __flush_tick_events(self, synth: tinysoundfont.Synth,
+    def __flush_tick_events(self, handle: int, synth: tinysoundfont.Synth,
                                   tick_events: list[mido.Message]) -> None:
         """Flush tick events."""
         if not tick_events:
@@ -147,22 +145,28 @@ class Worker(QThread):
                     synth.noteon(0, n, chord_velocity)
                 synth.control_change(0, 7, self.__volume)
             else:
-                play_chord(chord_notes)
+                play_chord(handle, chord_notes)
         tick_events.clear()
 
     @override
     def run(self) -> None:
         """Worker body with proper chord grouping and tempo handling."""
-        self.__error = False
         try:
             player: mido.MidiFile = mido.MidiFile(self.__filename)
         except mido.midifiles.meta.KeySignatureError:
-            self.__error = True
+            self.error.emit("Invalid MIDI File.\nPlease select valid MIDI file.")
             return
         synth: tinysoundfont.Synth = tinysoundfont.Synth()
+        handle: int = 0
         if self.__is_audio:
             synth.start()
             synth.program_select(0, synth.sfload(self.__soundfont), 0, 0)
+        elif IS_WINDOWS:
+            handle = win32gui.FindWindow(None, "Where Winds Meet")
+            if not handle:
+                self.error.emit("Where Winds Meet is not running.\n"
+                                "Please run the game then try again.")
+                return
         tick_events: list[mido.Message] = []
         self.__calculate_duration()
         current_song_time: float = .0
@@ -186,12 +190,12 @@ class Worker(QThread):
                 time.sleep(min(0.001, current_song_time - elapsed))
             if msg.type in ("note_on", "note_off"):
                 tick_events = [msg]
-                self.__flush_tick_events(synth, tick_events)
+                self.__flush_tick_events(handle, synth, tick_events)
             elif msg.type == "control_change" and self.__is_audio:
                 synth.control_change(0, msg.control, msg.value)
             if self.__is_audio:
                 synth.control_change(0, 7, self.__volume)
-        self.__flush_tick_events(synth, tick_events)
+        self.__flush_tick_events(handle, synth, tick_events)
         synth.stop()
 
     def stop(self) -> None:
@@ -276,6 +280,17 @@ class Player(QMainWindow):
             return
         self.__current += 1
 
+    @Slot(str)
+    def __show_error(self, msg: str) -> None:
+        """Show error message and stop counter."""
+        try:
+            self.__progress_timer.stop()
+        except AttributeError:
+            ...
+        self.__progressbar.setValue(0)
+        self.__current_time.setText("00:00")
+        QMessageBox.critical(self, "Error", msg)
+
     def __start_playback(self) -> None:
         """Start playback."""
         if self.__thread and self.__thread.isRunning():
@@ -287,14 +302,12 @@ class Player(QMainWindow):
         self.__thread = Worker(self.__files[self.__current_index], self.__soundfont.as_posix(),
                                is_audio)
         self.__thread.duration_ready.connect(self.__duration_ready)
+        self.__thread.error.connect(self.__show_error)
         self.__thread.finished.connect(lambda: self.__play.setChecked(False))
         if not is_audio:
             time.sleep(1)
         self.__thread.start()
-        if self.__thread.error:
-            self.__file.setText("Invalid file. Please select another one.")
-        else:
-            self.__file.setText(self.__playlist.currentItem().text())
+        self.__file.setText(self.__playlist.currentItem().text())
 
     def __playlist_on_double_click(self, item: QListWidgetItem) -> None:
         """Play track when double-clicked in playlist."""

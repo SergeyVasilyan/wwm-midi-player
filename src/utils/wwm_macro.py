@@ -1,8 +1,15 @@
 """WWM Macro Module (Konghou) — programmatic mapping + calibration."""
 
+import platform
 from enum import IntEnum
 
-import keyboard
+IS_WINDOWS: bool = "Windows" == platform.system()
+if IS_WINDOWS:
+    import win32api
+    import win32con
+    import win32gui
+else:
+    import keyboard
 
 DEGREE_OFFSETS: dict[str, int] = {
     "1" : 0,  "#1": 1,
@@ -77,12 +84,57 @@ def __transpose_into_range(note: int) -> int:
         note -= Note.OFFSET
     return note
 
-def play_note(note: int) -> None:
+def get_virtual_keycode(key: int) -> int:
+    """Convert a character to its Virtual Key Code."""
+    return win32api.MapVirtualKey(key, 0)
+
+def make_lparam(key: int, is_down: bool=False) -> int:
+    """Construct the complex lParam integer that Windows expects.
+
+    This mimics the hardware details of a keypress.
+    """
+    scan_code: int = get_virtual_keycode(key)
+    lparam: int = 1
+    lparam |= (scan_code << 16)
+    if not is_down:
+        lparam |= (1 << 30)
+        lparam |= (1 << 31)
+    return lparam
+
+def post_key_event(handle: int, vk_code: int) -> None:
+    """Send a complete Press & Release cycle."""
+    lparam_down = make_lparam(vk_code, True)
+    lparam_up = make_lparam(vk_code, False)
+    win32api.PostMessage(handle, win32con.WM_KEYDOWN, vk_code, lparam_down)
+    win32api.PostMessage(handle, win32con.WM_KEYUP, vk_code, lparam_up)
+
+def __send_keypress_to_window(handle: int, key_string: str) -> None:
+    """Send keypress to a specified window."""
+    parts: list[str] = key_string.split("+")
+    modifier_vk: int|None = None
+    main_char: str = parts[-1]
+    if "Shift" in parts:
+        modifier_vk = win32con.VK_SHIFT
+    elif "Ctrl" in parts:
+        modifier_vk = win32con.VK_CONTROL
+    main_vk: int = win32api.VkKeyScan(main_char) & 0xFF
+    if modifier_vk:
+        lp_mod: int = make_lparam(modifier_vk, True)
+        win32api.PostMessage(handle, win32con.WM_KEYDOWN, modifier_vk, lp_mod)
+    post_key_event(handle, main_vk)
+    if modifier_vk:
+        lp_mod_up: int = make_lparam(modifier_vk, False)
+        win32api.PostMessage(handle, win32con.WM_KEYUP, modifier_vk, lp_mod_up)
+
+def play_note(handle: int, note: int) -> None:
     """Play note."""
     if key := NOTE_TO_WWM_KEY.get(__transpose_into_range(note)):
-        keyboard.send(key.lower())
+        if IS_WINDOWS:
+            __send_keypress_to_window(handle, key)
+        else:
+            keyboard.send(key.lower())
 
-def play_chord(notes: list[int]) -> None:
+def play_chord(handle: int, notes: list[int]) -> None:
     """Play chord."""
     for n in notes:
-        play_note(n)
+        play_note(handle, n)
