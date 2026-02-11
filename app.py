@@ -304,8 +304,6 @@ class Player(QMainWindow):
         self.__thread.duration_ready.connect(self.__duration_ready)
         self.__thread.error.connect(self.__show_error)
         self.__thread.finished.connect(lambda: self.__play.setChecked(False))
-        if not is_audio:
-            time.sleep(1)
         self.__thread.start()
         self.__file.setText(self.__playlist.currentItem().text())
 
