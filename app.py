@@ -32,9 +32,10 @@ from src.ui.buttons.play import PlayButton
 from src.ui.buttons.previous import PreviousButton
 from src.ui.playlist import PlayList
 from src.ui.progressbar import ProgressBar
+from src.ui.settings import SettingsDialog
 from src.ui.toggle_switch import ToggleSwitch
 from src.ui.volume_slider import Volume
-from src.utils.wwm_macro import IS_WINDOWS, play_chord
+from src.utils.wwm_macro import IS_WINDOWS, KeyManager
 
 if IS_WINDOWS:
     import win32gui
@@ -52,6 +53,7 @@ class Worker(QThread):
         self.__is_audio: bool = is_audio
         self.__filename: str = filename
         self.__soundfont: str = soundfont
+        self.__key_manager: KeyManager = KeyManager()
         self.__running: bool = True
         self.__paused: bool = False
         self.__volume: int = 100
@@ -145,7 +147,7 @@ class Worker(QThread):
                     synth.noteon(0, n, chord_velocity)
                 synth.control_change(0, 7, self.__volume)
             else:
-                play_chord(handle, chord_notes)
+                self.__key_manager.play_chord(handle, chord_notes)
         tick_events.clear()
 
     @override
@@ -376,9 +378,15 @@ class Player(QMainWindow):
         if self.__thread and self.__thread.isRunning():
             self.__thread.set_volume(value)
 
-    def __show_about(self):
+    def __show_settings(self) -> None:
+        """Open Settings dialog."""
+        dialog: SettingsDialog = SettingsDialog(self)
+        dialog.exec()
+
+    def __show_about(self) -> None:
+        """Show about message."""
         QMessageBox.information(self, "About",
-                                "Windows MIDI Player for WWM\nBuilt with PySide6 + FluidSynth")
+                                "MIDI Player for WWM\nBuilt with PySide6 + TinySoundFont")
 
     def __construct_button(self, text: str, callback: Callable, key: str="") -> QVBoxLayout:
         """Construct button."""
@@ -421,12 +429,15 @@ class Player(QMainWindow):
         """Construct playback menu."""
         menu_bar: QMenuBar = self.menuBar()
         menu: QMenu = menu_bar.addMenu("&Playback")
-        previous_action: QAction = QAction("Previous", self)
+        previous_action: QAction = QAction("Previous", parent=self)
         play_action: QAction = QAction("Play/Pause", self)
         next_action: QAction = QAction("Next", self)
         previous_action.triggered.connect(self.__previous_on_click)
         play_action.triggered.connect(self.__play_on_click)
         next_action.triggered.connect(self.__next_on_click)
+        previous_action.setShortcut(Qt.Key.Key_F9)
+        play_action.setShortcut(Qt.Key.Key_F10)
+        next_action.setShortcut(Qt.Key.Key_F11)
         menu.addAction(previous_action)
         menu.addAction(play_action)
         menu.addAction(next_action)
@@ -439,10 +450,19 @@ class Player(QMainWindow):
         about_action.triggered.connect(self.__show_about)
         menu.addAction(about_action)
 
+    def __construct_setting_menu(self) -> None:
+        """Construct settings menu."""
+        menu_bar: QMenuBar = self.menuBar()
+        menu: QMenu = menu_bar.addMenu("&Settings")
+        settings_action: QAction = QAction("Settings", self)
+        settings_action.triggered.connect(self.__show_settings)
+        menu.addAction(settings_action)
+
     def __construct_menu_bar(self) -> None:
         """Construct menu bar."""
         self.__construct_file_menu()
         self.__construct_playback_menu()
+        self.__construct_setting_menu()
         self.__construct_help_menu()
 
     def __construct_volume_slider(self) -> QHBoxLayout:

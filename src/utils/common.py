@@ -1,10 +1,25 @@
 """Common functionality used by different modules."""
 
+import platform
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
 
 from PySide6.QtGui import QColor
 
+IS_WINDOWS: bool = "Windows" == platform.system()
+
+class Singleton(type):
+    """Singleton implementation."""
+
+    _instances: dict[Callable, Callable] = {}
+
+    def __call__(cls, *args, **kwargs) -> Callable:
+        """Override object call dunder method."""
+        if cls not in cls._instances:
+            instance = super().__call__(*args, **kwargs)
+            cls._instances[cls] = instance
+        return cls._instances[cls]
 
 @dataclass
 class Color:
