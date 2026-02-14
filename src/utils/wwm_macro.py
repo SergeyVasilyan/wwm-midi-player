@@ -1,6 +1,10 @@
 """WWM Macro Module (Konghou) — programmatic mapping + calibration."""
 
+import json
 from enum import IntEnum
+from pathlib import Path
+
+from PySide6.QtCore import Slot
 
 from src.utils.common import IS_WINDOWS, Singleton
 
@@ -32,15 +36,15 @@ class KeyManager(metaclass=Singleton):
             "6" : 9,
             "b7": 10, "7" : 11,
         }
-        self.__bindings: dict[str, dict[str, str]] = {
-            "low": {
-                "1" : "Z",      "#1": "Shift+Z",
-                "2" : "X",
-                "b3": "Ctrl+C", "3" : "C",
-                "4" : "V",      "#4": "Shift+V",
-                "5" : "B",      "#5": "Shift+B",
-                "6" : "N",
-                "b7": "Ctrl+M", "7" : "M",
+        self.__default_bindings: dict[str, dict[str, str]] = {
+            "high": {
+                "1" : "Q",      "#1": "Shift+Q",
+                "2" : "W",
+                "b3": "Ctrl+E", "3" : "E",
+                "4" : "R",      "#4": "Shift+R",
+                "5" : "T",      "#5": "Shift+T",
+                "6" : "Y",
+                "b7": "Ctrl+U", "7" : "U",
             },
             "med": {
                 "1" : "A",      "#1": "Shift+A",
@@ -51,23 +55,74 @@ class KeyManager(metaclass=Singleton):
                 "6" : "H",
                 "b7": "Ctrl+J", "7" : "J",
             },
-            "high": {
-                "1" : "Q",      "#1": "Shift+Q",
-                "2" : "W",
-                "b3": "Ctrl+E", "3" : "E",
-                "4" : "R",      "#4": "Shift+R",
-                "5" : "T",      "#5": "Shift+T",
-                "6" : "Y",
-                "b7": "Ctrl+U", "7" : "U",
+            "low": {
+                "1" : "Z",      "#1": "Shift+Z",
+                "2" : "X",
+                "b3": "Ctrl+C", "3" : "C",
+                "4" : "V",      "#4": "Shift+V",
+                "5" : "B",      "#5": "Shift+B",
+                "6" : "N",
+                "b7": "Ctrl+M", "7" : "M",
             },
         }
+        self.__bindings: dict[str, dict[str, str]] = {}
         self.__base_notes: dict[str, int] = {
             "low": 48,   # C3
             "med": 60,   # C4
             "high": 72,  # C5
         }
         self.__mapping: dict[int, str] = {}
+        self.__cache: Path = Path("src/input/keybindings.json")
+        internal: Path = Path("_internal/")
+        if internal.exists():
+            self.__cache = internal / self.__cache
+        self.__load_keybindings()
         self.__build_map()
+
+    @property
+    def bindings(self) -> dict[str, dict[str, str]]:
+        """Return current keybindings."""
+        return self.__bindings
+
+    @Slot(str, str, str)
+    def update_keybinding(self, octave: str, note: str, new_key: str) -> None:
+        """Update keybindings."""
+        octave_info: dict[str, str] = self.__bindings.get(octave, {})
+        if not octave_info:
+            return
+        if note not in octave_info:
+            return
+        if new_key == octave_info.get(note, ""):
+            return
+        octave_info[note] = new_key
+        sharp_note: str = f"#{note}"
+        if sharp_note in octave_info:
+            octave_info[sharp_note] = f"{octave_info[sharp_note].split('+')[0]}+{new_key}"
+        b_note: str = f"b{note}"
+        if b_note in octave_info:
+            octave_info[b_note] = f"{octave_info[b_note].split('+')[0]}+{new_key}"
+        self.__build_map()
+        self.__save_keybindings()
+
+    @Slot()
+    def reset_keybindings(self) -> None:
+        """Reset keybindings."""
+        self.__bindings = self.__default_bindings.copy()
+        self.__build_map()
+        self.__save_keybindings()
+
+    def __load_keybindings(self) -> None:
+        """Load save keybindings."""
+        if not self.__cache.exists():
+            self.__bindings = self.__default_bindings.copy()
+            return
+        with self.__cache.open() as f:
+            self.__bindings = json.load(f)
+
+    def __save_keybindings(self) -> None:
+        """Save current keybinding."""
+        with self.__cache.open("w") as f:
+            json.dump(self.__bindings, f, indent=4)
 
     def __build_map(self) -> None:
         """Construct NOTE_TO_WWM_KEY from BASE_NOTES, DEGREE_OFFSETS, and REGISTER_KEYS."""
@@ -86,17 +141,12 @@ class KeyManager(metaclass=Singleton):
             note -= self._Note.OFFSET
         return self.__mapping.get(note, None)
 
-    @staticmethod
-    def __get_virtual_keycode(key: int) -> int:
-        """Convert a character to its Virtual Key Code."""
-        return win32api.MapVirtualKey(key, 0)
-
     def __make_lparam(self, key: int, is_down: bool=False) -> int:
         """Construct the complex lParam integer that Windows expects.
 
         This mimics the hardware details of a keypress.
         """
-        scan_code: int = self.__get_virtual_keycode(key)
+        scan_code: int = win32api.MapVirtualKey(key, 0)
         lparam: int = 1
         lparam |= (scan_code << 16)
         if not is_down:

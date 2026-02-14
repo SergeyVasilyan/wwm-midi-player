@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QWidget,
 )
+from src.ui.key_configurator import KeyConfigurator
 
 
 class SettingsDialog(QDialog):
@@ -22,10 +23,16 @@ class SettingsDialog(QDialog):
         self.setModal(True)
         self.__create_layout()
 
+    def __open_key_configurator_on_click(self) -> None:
+        """Open KeyConfigurator button click callback."""
+        dialog: KeyConfigurator = KeyConfigurator(self)
+        dialog.exec()
+
     def __construct_key_binding_section(self, layout: QGridLayout, row: int) -> int:
         """Construct key binding configuration section."""
         button: QPushButton = QPushButton()
         button.setText("Open")
+        button.clicked.connect(self.__open_key_configurator_on_click)
         layout.addWidget(QLabel("Configure keybindings"), row, 0, 1, 1,
                          alignment=Qt.AlignmentFlag.AlignRight)
         layout.addWidget(button, row, 1, 1, 1)
