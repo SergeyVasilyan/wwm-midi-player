@@ -9,6 +9,7 @@ from typing import override
 
 import keyboard
 import mido
+from src.ui.special import SpecialDialog
 import tinysoundfont
 from PySide6.QtCore import QRect, QSize, QThread, QTimer, Signal, Slot
 from PySide6.QtGui import QAction, QGuiApplication, QIcon, Qt
@@ -388,6 +389,11 @@ class Player(QMainWindow):
         QMessageBox.information(self, "About",
                                 "MIDI Player for WWM\nBuilt with PySide6 + TinySoundFont")
 
+    def __show_special(self) -> None:
+        """Open Special dialog."""
+        dialog: SpecialDialog = SpecialDialog(self)
+        dialog.exec()
+
     def __construct_button(self, text: str, callback: Callable, key: str="") -> QVBoxLayout:
         """Construct button."""
         layout: QVBoxLayout = QVBoxLayout()
@@ -442,14 +448,6 @@ class Player(QMainWindow):
         menu.addAction(play_action)
         menu.addAction(next_action)
 
-    def __construct_help_menu(self) -> None:
-        """Construct help menu."""
-        menu_bar: QMenuBar = self.menuBar()
-        menu: QMenu = menu_bar.addMenu("&Help")
-        about_action: QAction = QAction("About", self)
-        about_action.triggered.connect(self.__show_about)
-        menu.addAction(about_action)
-
     def __construct_setting_menu(self) -> None:
         """Construct settings menu."""
         menu_bar: QMenuBar = self.menuBar()
@@ -458,12 +456,29 @@ class Player(QMainWindow):
         settings_action.triggered.connect(self.__show_settings)
         menu.addAction(settings_action)
 
+    def __construct_help_menu(self) -> None:
+        """Construct help menu."""
+        menu_bar: QMenuBar = self.menuBar()
+        menu: QMenu = menu_bar.addMenu("&Help")
+        about_action: QAction = QAction("About", self)
+        about_action.triggered.connect(self.__show_about)
+        menu.addAction(about_action)
+
+    def __construct_special_menu(self) -> None:
+        """Construct special menu."""
+        menu_bar: QMenuBar = self.menuBar()
+        # menu: QMenu = menu_bar.addMenu("&Special")
+        action: QAction = QAction("&Special", self)
+        action.triggered.connect(self.__show_special)
+        menu_bar.addAction(action)
+
     def __construct_menu_bar(self) -> None:
         """Construct menu bar."""
         self.__construct_file_menu()
         self.__construct_playback_menu()
         self.__construct_setting_menu()
         self.__construct_help_menu()
+        self.__construct_special_menu()
 
     def __construct_volume_slider(self) -> QHBoxLayout:
         """Construct volume slider."""

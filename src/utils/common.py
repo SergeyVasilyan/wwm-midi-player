@@ -29,7 +29,7 @@ class Color:
     qcolor: QColor  = field(init=False)
 
     def __post_init__(self) -> None:
-        """Post initialization calcultion."""
+        """Post initialization calculation."""
         if not self.hex.startswith("#"):
             self.hex = "#" + self.hex
         self.qcolor = QColor(self.hex)
@@ -40,3 +40,9 @@ class Colors(Enum):
     ACCENT_1 = Color("#2E7D32")
     ACCENT_2 = Color("#8D6E63")
     BACKGROUND = Color("#111111")
+    BACKGROUND_1 = Color("#101010")
+    RED = Color("#FF0000")
+    GREEN = Color("#00FF00")
+    BLUE = Color("#0000FF")
+    BLACK = Color("#000000")
+    WHITE = Color("#FFFFFF")

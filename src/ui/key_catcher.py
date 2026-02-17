@@ -11,16 +11,16 @@ from PySide6.QtWidgets import QDialog, QGridLayout, QHBoxLayout, QLabel, QPushBu
 class KeyCatcher(QDialog):
     """Key Catcher dialog."""
 
-    def __init__(self, parent: QWidget|None=None) -> None:
+    def __init__(self, forbidden_keys: list[str], parent: QWidget|None=None) -> None:
         """Initialize Key Catcher."""
         super().__init__(parent)
-        if parent:
-            self.setWindowIcon(parent.windowIcon())
         self.setWindowTitle("Key Catcher")
-        self.setGeometry(300, 300, 250, 150)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.__pressed_key: str = ""
-        self.__label: QLabel = QLabel("Waiting....")
+        self.__label: QLabel
+        self.__error_label: QLabel
+        self.__forbidden_keys: list[str] = forbidden_keys
+        self.__save_button: QPushButton
         self.__construct_layout()
 
     @property
@@ -36,20 +36,29 @@ class KeyCatcher(QDialog):
 
     def __construct_hint_section(self, layout: QGridLayout, row: int) -> int:
         """Construct hint section."""
-        layout.addWidget(QLabel("Allowed keys a-z, A-Z, and 0-9"), row, 0, 1, -1,
+        layout.addWidget(QLabel("Allowed keys A-Z, and 0-9"), row, 0, 1, -1,
                         alignment=Qt.AlignmentFlag.AlignCenter)
         row += 1
+        self.__label = QLabel("Waiting....")
+        self.__label.setStyleSheet("font-size: 14pt; padding: 0px 8xp; font-weight: bold;"
+                                   "color: yellow;")
         layout.addWidget(self.__label, row, 0, 1, -1, alignment=Qt.AlignmentFlag.AlignCenter)
+        row += 1
+        self.__error_label = QLabel("Key is already assigned to another note")
+        self.__error_label.setStyleSheet("color: red;")
+        self.__error_label.hide()
+        layout.addWidget(self.__error_label, row, 0, 1, -1, alignment=Qt.AlignmentFlag.AlignCenter)
         return row + 1
 
     def __construct_buttons_section(self, layout: QGridLayout, row: int) -> int:
         """Construct buttons section."""
-        save: QPushButton = QPushButton("Save")
-        save.clicked.connect(self.__save_on_click)
+        self.__save_button = QPushButton("Save")
+        self.__save_button.setDisabled(True)
+        self.__save_button.clicked.connect(self.__save_on_click)
         widget: QWidget = QWidget()
         buttons_layout: QHBoxLayout = QHBoxLayout(widget)
         buttons_layout.addStretch()
-        buttons_layout.addWidget(save)
+        buttons_layout.addWidget(self.__save_button)
         buttons_layout.addStretch()
         layout.addWidget(widget, row, 0, 1, -1)
         return row + 1
@@ -61,15 +70,20 @@ class KeyCatcher(QDialog):
         row = self.__construct_hint_section(layout, row)
         row = self.__construct_buttons_section(layout, row)
         self.setLayout(layout)
-        self.adjustSize()
-        self.setFixedSize(self.size())
 
     @override
     def keyPressEvent(self, event: QKeyEvent) -> None:
         """Override key press event."""
-        if re.match(r"^[a-zA-Z0-9]$", event.text()):
-            self.__label.setText(event.text().upper())
-            event.accept()
+        pressed_key: str = event.text().upper()
+        if re.match(r"^[A-Z0-9]$", pressed_key):
+            self.__label.setText(pressed_key)
+            if pressed_key in self.__forbidden_keys:
+                self.__save_button.setDisabled(True)
+                self.__error_label.show()
+            else:
+                self.__save_button.setEnabled(True)
+                self.__error_label.hide()
+                event.accept()
         super().keyPressEvent(event)
 
 
