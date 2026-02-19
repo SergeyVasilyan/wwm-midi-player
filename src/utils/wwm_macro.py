@@ -1,11 +1,11 @@
 """WWM Macro Module (Konghou) — programmatic mapping + calibration."""
 
 import json
+from copy import deepcopy
 from enum import IntEnum
 from pathlib import Path
 
 from PySide6.QtCore import Slot
-
 from src.utils.common import IS_WINDOWS, Singleton
 
 if IS_WINDOWS:
@@ -80,6 +80,11 @@ class KeyManager(metaclass=Singleton):
         self.__build_map()
 
     @property
+    def default_bindings(self) -> dict[str, dict[str, str]]:
+        """Return default keybindings."""
+        return self.__default_bindings
+
+    @property
     def bindings(self) -> dict[str, dict[str, str]]:
         """Return current keybindings."""
         return self.__bindings
@@ -107,14 +112,14 @@ class KeyManager(metaclass=Singleton):
     @Slot()
     def reset_keybindings(self) -> None:
         """Reset keybindings."""
-        self.__bindings = self.__default_bindings.copy()
+        self.__bindings = deepcopy(self.__default_bindings)
         self.__build_map()
         self.__save_keybindings()
 
     def __load_keybindings(self) -> None:
         """Load save keybindings."""
         if not self.__cache.exists():
-            self.__bindings = self.__default_bindings.copy()
+            self.__bindings = deepcopy(self.__default_bindings)
             return
         with self.__cache.open() as f:
             self.__bindings = json.load(f)

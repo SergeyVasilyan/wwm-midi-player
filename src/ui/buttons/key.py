@@ -12,11 +12,24 @@ from src.utils.common import Colors
 class KeyButton(AbstractButton):
     """Key Button widget."""
 
-    def __init__(self, key: str="", parent: QWidget|None=None) -> None:
+    def __init__(self, key: str="", octave: str="", note: str="",
+                       parent: QWidget|None=None) -> None:
         """Initialize key Button widget."""
         super().__init__(parent=parent)
+        self.__octave: str = octave
+        self.__note: str = note
         self.setText(key)
         self.__error: bool = False
+
+    @property
+    def octave(self) -> str:
+        """Return key octave."""
+        return self.__octave
+
+    @property
+    def note(self) -> str:
+        """Return key note."""
+        return self.__note
 
     @override
     def paintEvent(self, event: QPaintEvent) -> None:

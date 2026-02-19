@@ -1,8 +1,9 @@
 """Key Configurator dialog."""
 
 import re
+from typing import Any
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Slot
 from PySide6.QtWidgets import (
     QDialog,
     QGridLayout,
@@ -27,27 +28,35 @@ class KeyConfigurator(QDialog):
         self.setWindowTitle("Key Configurator")
         self.setModal(True)
         self.__manager: KeyManager = KeyManager()
-        self.__map: dict[str, QPushButton] = {}
+        self.__buttons: list[KeyButton] = []
         self.__create_layout()
 
-    def __key_button_on_click(self, octave: str, note: str, key: str) -> None:
+    @Slot()
+    def __reset_on_click(self) -> None:
+        """Reset button click callback."""
+        default_bindings: dict[str, Any] = self.__manager.default_bindings
+        for button in self.__buttons:
+            button.setText(default_bindings[button.octave][button.note])
+        self.__manager.reset_keybindings()
+
+    def __key_button_on_click(self, button: KeyButton) -> None:
         """Key button click callback."""
-        forbidden_keys: list[str] = list(self.__map.keys())
-        forbidden_keys.remove(key)
+        forbidden_keys: list[str] = [button.text() for button in self.__buttons]
+        forbidden_keys.remove(button.text())
         dialog: KeyCatcher = KeyCatcher(forbidden_keys, parent=self)
         dialog.exec()
         pressed_key: str = dialog.key
         if not pressed_key:
             return
-        self.__manager.update_keybinding(octave, note, pressed_key)
-        self.__map[key].setText(pressed_key)
+        button.setText(pressed_key)
+        self.__manager.update_keybinding(button.octave, button.note, pressed_key)
 
     def __construct_key_button(self, layout: QHBoxLayout, octave: str, note: str, key: str) -> None:
         """Construct key button."""
-        button: KeyButton = KeyButton(key)
-        button.clicked.connect(lambda: self.__key_button_on_click(octave, note, key))
+        button: KeyButton = KeyButton(key, octave=octave, note=note)
+        button.clicked.connect(lambda: self.__key_button_on_click(button))
+        self.__buttons.append(button)
         layout.addWidget(button)
-        self.__map[key] = button
 
     def __construct_key_binding_section(self, layout: QGridLayout, row: int) -> int:
         """Construct key binding configuration section."""
@@ -88,7 +97,7 @@ class KeyConfigurator(QDialog):
         row += 1
         row = self.__construct_key_binding_section(layout, row)
         button: QPushButton = QPushButton("Reset")
-        button.clicked.connect(self.__manager.reset_keybindings)
+        button.clicked.connect(self.__reset_on_click)
         layout.addWidget(button, row, 0, 1, -1, alignment=Qt.AlignmentFlag.AlignCenter)
         self.setLayout(layout)
         self.adjustSize()
