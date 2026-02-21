@@ -31,11 +31,11 @@ from PySide6.QtWidgets import (
 from ui.buttons.next import NextButton
 from ui.buttons.play import PlayButton
 from ui.buttons.previous import PreviousButton
-from ui.playlist import PlayList
 from ui.progressbar import ProgressBar
 from ui.settings import SettingsDialog
 from ui.special import SpecialDialog
 from ui.toggle_switch import ToggleSwitch
+from ui.viewer import Viewer
 from ui.volume_slider import Volume
 from utils.wwm_macro import IS_WINDOWS, KeyManager
 
@@ -229,15 +229,14 @@ class Player(QMainWindow):
         if not self.__soundfont.exists():
             self.__soundfont = "_internal" / self.__soundfont
         self.__file: QLabel = QLabel("No files loaded")
-        self.__playlist: PlayList = PlayList()
-        self.__playlist.itemDoubleClicked.connect(self.__playlist_on_double_click)
-        self.__play: PlayButton
         self.__progressbar: ProgressBar = ProgressBar()
         self.__mode_toggle: ToggleSwitch = ToggleSwitch()
         self.__current_time: QLabel = QLabel("00:00")
         self.__duration_time: QLabel = QLabel("00:00")
         self.__current: int = 0
         self.__duration: int = 0
+        self.__viewer: Viewer
+        self.__play: PlayButton
         self.__progress_timer: QTimer
         self.__construct_menu_bar()
         self.__construct_layout()
@@ -297,7 +296,7 @@ class Player(QMainWindow):
             self.__thread.stop()
             self.__thread.wait()
         self.__play.setChecked(True)
-        self.__playlist.setCurrentRow(self.__current_index)
+        self.__viewer.playlist.setCurrentRow(self.__current_index)
         is_audio: bool = self.__mode_toggle.isChecked()
         self.__thread = Worker(self.__files[self.__current_index], self.__soundfont.as_posix(),
                                is_audio)
@@ -305,11 +304,11 @@ class Player(QMainWindow):
         self.__thread.error.connect(self.__show_error)
         self.__thread.finished.connect(lambda: self.__play.setChecked(False))
         self.__thread.start()
-        self.__file.setText(self.__playlist.currentItem().text())
+        self.__file.setText(self.__viewer.playlist.currentItem().text())
 
     def __playlist_on_double_click(self, item: QListWidgetItem) -> None:
         """Play track when double-clicked in playlist."""
-        self.__current_index = self.__playlist.row(item)
+        self.__current_index = self.__viewer.playlist.row(item)
         self.__start_playback()
 
     def __save_playlist(self) -> None:
@@ -328,9 +327,9 @@ class Player(QMainWindow):
             return
         with Path(filename).open(encoding="utf-8") as f:
             self.__files = [line.strip() for line in f if line.strip()]
-        self.__playlist.clear()
+        self.__viewer.playlist.clear()
         for path in self.__files:
-            self.__playlist.addItem(Path(path).name)
+            self.__viewer.playlist.addItem(Path(path).name)
         self.__current_index = 0
         self.__file.setText(f"Loaded playlist with {len(self.__files)} files.")
 
@@ -342,9 +341,9 @@ class Player(QMainWindow):
             return
         self.__files = files
         self.__current_index = 0
-        self.__playlist.clear()
+        self.__viewer.playlist.clear()
         for f in files:
-            self.__playlist.addItem(Path(f).name)
+            self.__viewer.playlist.addItem(Path(f).name)
         self.__file.setText(f"Loaded {len(files)} files. Ready to play.")
 
     def __previous_on_click(self) -> None:
@@ -464,10 +463,10 @@ class Player(QMainWindow):
     def __construct_special_menu(self) -> None:
         """Construct special menu."""
         menu_bar: QMenuBar = self.menuBar()
-        # menu: QMenu = menu_bar.addMenu("&Special")
-        action: QAction = QAction("&Special", self)
+        menu: QMenu = menu_bar.addMenu("&Special")
+        action: QAction = QAction("Thanks", self)
         action.triggered.connect(self.__show_special)
-        menu_bar.addAction(action)
+        menu.addAction(action)
 
     def __construct_menu_bar(self) -> None:
         """Construct menu bar."""
@@ -503,9 +502,19 @@ class Player(QMainWindow):
         layout.addLayout(self.__construct_mode_toggle())
         return widget
 
+    def __construct_playlist(self) -> QHBoxLayout:
+        """Construct track section."""
+        layout: QHBoxLayout = QHBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.__viewer = Viewer()
+        self.__viewer.playlist.itemDoubleClicked.connect(self.__playlist_on_double_click)
+        layout.addWidget(self.__viewer)
+        return layout
+
     def __construct_track(self) -> QHBoxLayout:
         """Construct track section."""
         layout: QHBoxLayout = QHBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.__progressbar, stretch=1)
         layout.addWidget(self.__current_time, stretch=0)
         layout.addWidget(QLabel("/"), stretch=0)
@@ -536,7 +545,7 @@ class Player(QMainWindow):
         widget: QWidget = QWidget()
         self.setCentralWidget(widget)
         layout: QVBoxLayout = QVBoxLayout(widget)
-        layout.addWidget(self.__playlist)
+        layout.addLayout(self.__construct_playlist())
         layout.addLayout(self.__construct_track())
         layout.addLayout(self.__construct_controls())
 

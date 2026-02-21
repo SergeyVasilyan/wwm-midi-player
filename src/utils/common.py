@@ -7,7 +7,7 @@ from enum import Enum
 
 from PySide6.QtGui import QColor
 
-IS_WINDOWS: bool = "Windows" == platform.system()
+IS_WINDOWS: bool = platform.system() == "Windows"
 
 class Singleton(type):
     """Singleton implementation."""

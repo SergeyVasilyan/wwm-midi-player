@@ -43,5 +43,5 @@ class SpecialDialog(QDialog):
         self.adjustSize()
         self.setFixedSize(self.size())
 
-if "__main__" == __name__:
+if __name__ == "__main__":
     ...
