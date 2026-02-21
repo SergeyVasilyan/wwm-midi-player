@@ -4,7 +4,8 @@
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QPushButton, QWidget
-from src.utils.common import Colors
+
+from utils.common import Colors
 
 
 class AbstractButton(QPushButton):
@@ -27,5 +28,5 @@ class AbstractButton(QPushButton):
             }
         """)
 
-if "__main__" == __name__:
+if __name__ == "__main__":
     ...

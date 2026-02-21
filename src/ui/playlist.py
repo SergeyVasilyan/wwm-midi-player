@@ -1,7 +1,8 @@
 """Playlist widget."""
 
 from PySide6.QtWidgets import QListWidget, QWidget
-from src.utils.common import Colors
+
+from utils.common import Colors
 
 
 class PlayList(QListWidget):
@@ -35,5 +36,5 @@ class PlayList(QListWidget):
             }}
         """)
 
-if "__main__" == __name__:
+if __name__ == "__main__":
     ...

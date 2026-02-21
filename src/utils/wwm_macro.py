@@ -6,7 +6,8 @@ from enum import IntEnum
 from pathlib import Path
 
 from PySide6.QtCore import Slot
-from src.utils.common import IS_WINDOWS, Singleton
+
+from utils.common import IS_WINDOWS, Singleton
 
 if IS_WINDOWS:
     import win32api

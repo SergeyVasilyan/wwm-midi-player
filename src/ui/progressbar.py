@@ -2,7 +2,8 @@
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QProgressBar, QWidget
-from src.utils.common import Colors
+
+from utils.common import Colors
 
 
 class ProgressBar(QProgressBar):
@@ -35,5 +36,5 @@ class ProgressBar(QProgressBar):
             }}
         """)
 
-if "__main__" == __name__:
+if __name__ == "__main__":
     ...

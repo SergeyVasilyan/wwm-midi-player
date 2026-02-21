@@ -2,7 +2,8 @@
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QSlider, QWidget
-from src.utils.common import Colors
+
+from utils.common import Colors
 
 
 class Volume(QSlider):
@@ -42,5 +43,5 @@ class Volume(QSlider):
             }}
         """)
 
-if "__main__" == __name__:
+if __name__ == "__main__":
     ...

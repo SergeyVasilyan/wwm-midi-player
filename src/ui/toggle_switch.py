@@ -15,7 +15,8 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import QColor, QPainter, QPaintEvent
 from PySide6.QtWidgets import QAbstractButton, QWidget
-from src.utils.common import Colors
+
+from utils.common import Colors
 
 
 class ToggleSwitch(QAbstractButton):
@@ -94,5 +95,5 @@ class ToggleSwitch(QAbstractButton):
             self.__animation.setEndValue(self.__offset)
         self.__animation.start()
 
-if "__main__" == __name__:
+if __name__ == "__main__":
     ...

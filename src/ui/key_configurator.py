@@ -13,10 +13,11 @@ from PySide6.QtWidgets import (
     QPushButton,
     QWidget,
 )
-from src.ui.buttons.key import KeyButton
-from src.ui.key_catcher import KeyCatcher
-from src.utils.common import Colors
-from src.utils.wwm_macro import KeyManager
+
+from ui.buttons.key import KeyButton
+from ui.key_catcher import KeyCatcher
+from utils.common import Colors
+from utils.wwm_macro import KeyManager
 
 
 class KeyConfigurator(QDialog):
@@ -103,5 +104,5 @@ class KeyConfigurator(QDialog):
         self.adjustSize()
         self.setFixedSize(self.size())
 
-if "__main__" == __name__:
+if __name__ == "__main__":
     ...

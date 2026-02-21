@@ -5,7 +5,8 @@ from typing import override
 from PySide6.QtCore import QPoint, QRect, Qt
 from PySide6.QtGui import QPainter, QPaintEvent, QPolygon
 from PySide6.QtWidgets import QWidget
-from src.ui.buttons.abstract import AbstractButton
+
+from ui.buttons.abstract import AbstractButton
 
 
 class PlayButton(AbstractButton):
@@ -37,5 +38,5 @@ class PlayButton(AbstractButton):
         painter.end()
         return super().paintEvent(event)
 
-if "__main__" == __name__:
+if __name__ == "__main__":
     ...

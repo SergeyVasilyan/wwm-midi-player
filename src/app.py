@@ -1,6 +1,6 @@
 """Simple PySide6 MIDI player."""
 
-import os
+import contextlib
 import sys
 import time
 from collections.abc import Callable
@@ -9,7 +9,6 @@ from typing import override
 
 import keyboard
 import mido
-from src.ui.special import SpecialDialog
 import tinysoundfont
 from PySide6.QtCore import QRect, QSize, QThread, QTimer, Signal, Slot
 from PySide6.QtGui import QAction, QGuiApplication, QIcon, Qt
@@ -28,15 +27,17 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from src.ui.buttons.next import NextButton
-from src.ui.buttons.play import PlayButton
-from src.ui.buttons.previous import PreviousButton
-from src.ui.playlist import PlayList
-from src.ui.progressbar import ProgressBar
-from src.ui.settings import SettingsDialog
-from src.ui.toggle_switch import ToggleSwitch
-from src.ui.volume_slider import Volume
-from src.utils.wwm_macro import IS_WINDOWS, KeyManager
+
+from ui.buttons.next import NextButton
+from ui.buttons.play import PlayButton
+from ui.buttons.previous import PreviousButton
+from ui.playlist import PlayList
+from ui.progressbar import ProgressBar
+from ui.settings import SettingsDialog
+from ui.special import SpecialDialog
+from ui.toggle_switch import ToggleSwitch
+from ui.volume_slider import Volume
+from utils.wwm_macro import IS_WINDOWS, KeyManager
 
 if IS_WINDOWS:
     import win32gui
@@ -75,7 +76,7 @@ class Worker(QThread):
             abs_ticks: int = 0
             for msg in track:
                 abs_ticks += msg.time
-                if "set_tempo" == msg.type:
+                if msg.type == "set_tempo":
                     tempo_map.append((abs_ticks, msg.tempo))
         clean_tempo_map: dict[int, int] = {}
         for tick, tempo in tempo_map:
@@ -126,10 +127,10 @@ class Worker(QThread):
     def __add_note(self, synth: tinysoundfont.Synth, msg: mido.Message, chord_notes: list[int],
                          velocities: list[int]) -> None:
         """Add note details."""
-        if "note_on" == msg.type and 0 < msg.velocity:
+        if msg.type == "note_on" and msg.velocity > 0:
             chord_notes.append(msg.note)
             velocities.append(msg.velocity)
-        elif "note_off" == msg.type and self.__is_audio:
+        elif msg.type == "note_off" and self.__is_audio:
             synth.noteoff(0, msg.note)
 
     def __flush_tick_events(self, handle: int, synth: tinysoundfont.Synth,
@@ -262,10 +263,8 @@ class Player(QMainWindow):
         minutes, seconds = self.__convert_to_mm_ss(self.__duration)
         self.__duration_time.setText(f"{minutes}:{seconds:02d}")
         self.__progressbar.setMaximum(self.__duration)
-        try:
+        with contextlib.suppress(AttributeError):
             self.__progress_timer.stop()
-        except AttributeError:
-            ...
         self.__progress_timer = QTimer(self)
         self.__progress_timer.timeout.connect(self.__update_progress)
         self.__progress_timer.start(1_000)
@@ -286,10 +285,8 @@ class Player(QMainWindow):
     @Slot(str)
     def __show_error(self, msg: str) -> None:
         """Show error message and stop counter."""
-        try:
+        with contextlib.suppress(AttributeError):
             self.__progress_timer.stop()
-        except AttributeError:
-            ...
         self.__progressbar.setValue(0)
         self.__current_time.setText("00:00")
         QMessageBox.critical(self, "Error", msg)
@@ -320,7 +317,7 @@ class Player(QMainWindow):
         filename, _ = QFileDialog.getSaveFileName(self, "Save Playlist", "", "Playlist (*.m3u)")
         if not filename:
             return
-        with open(filename, "w", encoding="utf-8") as f:
+        with Path(filename).open("w", encoding="utf-8") as f:
             for path in self.__files:
                 f.write(path + "\n")
 
@@ -329,11 +326,11 @@ class Player(QMainWindow):
         filename, _ = QFileDialog.getOpenFileName(self, "Load Playlist", "", "Playlist (*.m3u)")
         if not filename:
             return
-        with open(filename, encoding="utf-8") as f:
+        with Path(filename).open(encoding="utf-8") as f:
             self.__files = [line.strip() for line in f if line.strip()]
         self.__playlist.clear()
         for path in self.__files:
-            self.__playlist.addItem(os.path.basename(path))
+            self.__playlist.addItem(Path(path).name)
         self.__current_index = 0
         self.__file.setText(f"Loaded playlist with {len(self.__files)} files.")
 
@@ -347,7 +344,7 @@ class Player(QMainWindow):
         self.__current_index = 0
         self.__playlist.clear()
         for f in files:
-            self.__playlist.addItem(os.path.basename(f))
+            self.__playlist.addItem(Path(f).name)
         self.__file.setText(f"Loaded {len(files)} files. Ready to play.")
 
     def __previous_on_click(self) -> None:
@@ -358,7 +355,7 @@ class Player(QMainWindow):
 
     def __play_on_click(self) -> None:
         """Play button on click callback."""
-        if -1 == self.__current_index or not self.__files:
+        if self.__current_index == -1 or not self.__files:
             self.__file.setText("Please load MIDI files first!")
             self.__play.setChecked(False)
             return
@@ -399,11 +396,11 @@ class Player(QMainWindow):
         layout: QVBoxLayout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
         button: QPushButton
-        if "Next" == text:
+        if text == "Next":
             button = NextButton()
-        elif "Previous" == text:
+        elif text == "Previous":
             button = PreviousButton()
-        elif "Play" == text:
+        elif text == "Play":
             button = PlayButton()
             self.__play = button
         else:

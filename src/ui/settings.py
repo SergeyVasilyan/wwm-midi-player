@@ -8,7 +8,8 @@ from PySide6.QtWidgets import (
     QPushButton,
     QWidget,
 )
-from src.ui.key_configurator import KeyConfigurator
+
+from ui.key_configurator import KeyConfigurator
 
 
 class SettingsDialog(QDialog):
@@ -47,5 +48,5 @@ class SettingsDialog(QDialog):
         self.adjustSize()
         self.setFixedSize(self.size())
 
-if "__main__" == __name__:
+if __name__ == "__main__":
     ...
