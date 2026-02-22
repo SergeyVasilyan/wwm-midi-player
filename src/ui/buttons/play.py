@@ -44,7 +44,7 @@ class PlayButton(AbstractButton):
         """Override paint event."""
         painter: QPainter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        rect: QRectF = self.rect().adjusted(5, 5, -5, -5).toRectF()
+        rect: QRectF = self.rect().adjusted(5, 0, -5, 0).toRectF()
         painter.setBrush(QBrush(self._color))
         painter.setPen(Qt.PenStyle.NoPen)
         self.__morph = 1.0 if self.__is_playing else 0.0
@@ -58,7 +58,7 @@ class PlayButton(AbstractButton):
             painter.drawPolygon([p1, p2, p3])
         else:
             bar_width: float = rect.width() / 3
-            gap: float = bar_width / 2
+            gap: float = rect.width() - (2 * bar_width)
             left_bar: QRectF = QRectF(rect.left(), rect.top(), bar_width, rect.height())
             right_bar: QRectF = QRectF(rect.left() + bar_width + gap, rect.top(), bar_width,
                                       rect.height())

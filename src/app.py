@@ -232,10 +232,13 @@ class Player(QMainWindow):
         if not self.__soundfont.exists():
             self.__soundfont = "_internal" / self.__soundfont
         self.__file: QLabel = QLabel("No files loaded")
+        self.__file.setStyleSheet("font-weight: bold;")
         self.__progressbar: ProgressBar = ProgressBar()
         self.__mode_toggle: ToggleSwitch = ToggleSwitch()
         self.__current_time: QLabel = QLabel("00:00")
         self.__duration_time: QLabel = QLabel("00:00")
+        self.__current_time.setStyleSheet("font-weight: bold;")
+        self.__duration_time.setStyleSheet("font-weight: bold;")
         self.__current: int = 0
         self.__duration: int = 0
         self.__artists: Viewer
@@ -308,7 +311,7 @@ class Player(QMainWindow):
         self.__thread.error.connect(self.__show_error)
         self.__thread.finished.connect(lambda: self.__play.change.emit(False))
         self.__thread.start()
-        self.__file.setText(self.__songs.widget.currentItem().text())
+        self.__file.setText(self.__songs.widget.currentItem().text().split(".")[0])
 
     def __songs_on_double_click(self, item: QListWidgetItem) -> None:
         """Play track when double-clicked in song."""
@@ -350,6 +353,7 @@ class Player(QMainWindow):
             for group in re.split(r",| feat | ft | feat. | ft. |&", artist):
                 artists.add(group.strip())
         self.__artists.widget.addItems(["ALL", *sorted(artists)])
+        self.__artists.widget.setCurrentRow(0)
 
     def __load_playlist(self) -> None:
         """Load playlist from file."""
@@ -548,6 +552,8 @@ class Player(QMainWindow):
         """Construct track section."""
         layout: QHBoxLayout = QHBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+        layout.addWidget(self.__file, stretch=0)
         layout.addWidget(self.__progressbar, stretch=1)
         layout.addWidget(self.__current_time, stretch=0)
         layout.addWidget(QLabel("/"), stretch=0)
@@ -563,8 +569,6 @@ class Player(QMainWindow):
         layout.addLayout(self.__construct_button("Previous", self.__previous_on_click, key="F9"))
         layout.addLayout(self.__construct_button("Play", self.__play_on_click, key="F10"))
         layout.addLayout(self.__construct_button("Next", self.__next_on_click, key="F11"))
-        grid.addWidget(self.__file, 0, 0,
-                        alignment=Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         grid.addWidget(widget, 0, 1, alignment=Qt.AlignmentFlag.AlignCenter)
         grid.addWidget(self.__construct_helpers(), 0, 2, alignment=Qt.AlignmentFlag.AlignRight)
         columns_count: int = grid.columnCount()
