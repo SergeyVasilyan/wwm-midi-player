@@ -12,7 +12,7 @@ import keyboard
 import mido
 import tinysoundfont
 from PySide6.QtCore import QRect, QSize, QThread, QTimer, Signal, Slot
-from PySide6.QtGui import QAction, QGuiApplication, QIcon, Qt
+from PySide6.QtGui import QAction, QCloseEvent, QGuiApplication, QIcon, Qt
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -254,7 +254,7 @@ class Player(QMainWindow):
     def __bind_shortcuts(self) -> None:
         """Bind shortcuts."""
         keyboard.add_hotkey("f9", self.__previous_on_click)
-        keyboard.add_hotkey("f10", self.__play_on_click)
+        keyboard.add_hotkey("f10", self.__play.click)
         keyboard.add_hotkey("f11", self.__next_on_click)
         keyboard.add_hotkey("f8", self.__mode_toggle.toggle)
 
@@ -299,14 +299,14 @@ class Player(QMainWindow):
         if self.__thread and self.__thread.isRunning():
             self.__thread.stop()
             self.__thread.wait()
-        self.__play.setChecked(True)
+        self.__play.change.emit(True)
         self.__songs.widget.setCurrentRow(self.__current_index)
         is_audio: bool = self.__mode_toggle.isChecked()
         self.__thread = Worker(self.__files[self.__current_index], self.__soundfont.as_posix(),
                                is_audio)
         self.__thread.duration_ready.connect(self.__duration_ready)
         self.__thread.error.connect(self.__show_error)
-        self.__thread.finished.connect(lambda: self.__play.setChecked(False))
+        self.__thread.finished.connect(lambda: self.__play.change.emit(False))
         self.__thread.start()
         self.__file.setText(self.__songs.widget.currentItem().text())
 
@@ -381,10 +381,10 @@ class Player(QMainWindow):
         """Play button on click callback."""
         if self.__current_index == -1 or not self.__files:
             self.__file.setText("Please load MIDI files first!")
-            self.__play.setChecked(False)
+            self.__play.change.emit(False)
             return
         if self.__thread and self.__thread.isRunning():
-            self.__play.setChecked(self.__thread.paused)
+            self.__play.change.emit(self.__thread.paused)
             self.__thread.toggle_pause()
         else:
             self.__start_playback()
@@ -462,9 +462,6 @@ class Player(QMainWindow):
         previous_action.triggered.connect(self.__previous_on_click)
         play_action.triggered.connect(self.__play_on_click)
         next_action.triggered.connect(self.__next_on_click)
-        previous_action.setShortcut(Qt.Key.Key_F9)
-        play_action.setShortcut(Qt.Key.Key_F10)
-        next_action.setShortcut(Qt.Key.Key_F11)
         menu.addAction(previous_action)
         menu.addAction(play_action)
         menu.addAction(next_action)
@@ -584,6 +581,14 @@ class Player(QMainWindow):
         layout.addLayout(self.__construct_playlist())
         layout.addLayout(self.__construct_track())
         layout.addLayout(self.__construct_controls())
+
+    @override
+    def closeEvent(self, event: QCloseEvent, /) -> None:
+        """Override close event."""
+        if self.__thread and self.__thread.isRunning():
+            self.__thread.stop()
+            self.__thread.wait()
+        return super().closeEvent(event)
 
 if __name__ == "__main__":
     app: QApplication = QApplication(sys.argv)
