@@ -1,6 +1,7 @@
 """Simple PySide6 MIDI player."""
 
 import contextlib
+import re
 import sys
 import time
 from collections.abc import Callable
@@ -18,6 +19,7 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QListWidget,
     QListWidgetItem,
     QMainWindow,
     QMenu,
@@ -235,7 +237,8 @@ class Player(QMainWindow):
         self.__duration_time: QLabel = QLabel("00:00")
         self.__current: int = 0
         self.__duration: int = 0
-        self.__viewer: Viewer
+        self.__artists: Viewer
+        self.__songs: Viewer
         self.__play: PlayButton
         self.__progress_timer: QTimer
         self.__construct_menu_bar()
@@ -296,7 +299,7 @@ class Player(QMainWindow):
             self.__thread.stop()
             self.__thread.wait()
         self.__play.setChecked(True)
-        self.__viewer.playlist.setCurrentRow(self.__current_index)
+        self.__songs.widget.setCurrentRow(self.__current_index)
         is_audio: bool = self.__mode_toggle.isChecked()
         self.__thread = Worker(self.__files[self.__current_index], self.__soundfont.as_posix(),
                                is_audio)
@@ -304,12 +307,23 @@ class Player(QMainWindow):
         self.__thread.error.connect(self.__show_error)
         self.__thread.finished.connect(lambda: self.__play.setChecked(False))
         self.__thread.start()
-        self.__file.setText(self.__viewer.playlist.currentItem().text())
+        self.__file.setText(self.__songs.widget.currentItem().text())
 
-    def __playlist_on_double_click(self, item: QListWidgetItem) -> None:
-        """Play track when double-clicked in playlist."""
-        self.__current_index = self.__viewer.playlist.row(item)
+    def __songs_on_double_click(self, item: QListWidgetItem) -> None:
+        """Play track when double-clicked in song."""
+        self.__current_index = self.__songs.widget.row(item)
         self.__start_playback()
+
+    def __artists_on_double_click(self, item: QListWidgetItem) -> None:
+        """Filter songs by double-clicked artist."""
+        artist: str = item.text()
+        songs: QListWidget = self.__songs.widget
+        for i in range(songs.count()):
+            song_item: QListWidgetItem = songs.item(i)
+            if artist == "ALL" or artist in song_item.text():
+                song_item.setHidden(False)
+            else:
+                song_item.setHidden(True)
 
     def __save_playlist(self) -> None:
         """Save playlist to file."""
@@ -320,6 +334,22 @@ class Player(QMainWindow):
             for path in self.__files:
                 f.write(path + "\n")
 
+    def __add_songs(self) -> None:
+        """Add songs."""
+        self.__current_index = 0
+        self.__artists.widget.clear()
+        self.__songs.widget.clear()
+        artists: set[str] = set()
+        for f in self.__files:
+            file_name: str = Path(f).name
+            self.__songs.widget.addItem(file_name)
+            artist: str = "Unknown"
+            if " - " in file_name:
+                artist = file_name.split(" - ")[0]
+            for group in re.split(r",| feat | ft | feat. | ft. |&", artist):
+                artists.add(group.strip())
+        self.__artists.widget.addItems(["ALL", *sorted(artists)])
+
     def __load_playlist(self) -> None:
         """Load playlist from file."""
         filename, _ = QFileDialog.getOpenFileName(self, "Load Playlist", "", "Playlist (*.m3u)")
@@ -327,10 +357,7 @@ class Player(QMainWindow):
             return
         with Path(filename).open(encoding="utf-8") as f:
             self.__files = [line.strip() for line in f if line.strip()]
-        self.__viewer.playlist.clear()
-        for path in self.__files:
-            self.__viewer.playlist.addItem(Path(path).name)
-        self.__current_index = 0
+        self.__add_songs()
         self.__file.setText(f"Loaded playlist with {len(self.__files)} files.")
 
     def __browse_on_click(self) -> None:
@@ -340,10 +367,7 @@ class Player(QMainWindow):
         if not files:
             return
         self.__files = files
-        self.__current_index = 0
-        self.__viewer.playlist.clear()
-        for f in files:
-            self.__viewer.playlist.addItem(Path(f).name)
+        self.__add_songs()
         self.__file.setText(f"Loaded {len(files)} files. Ready to play.")
 
     def __previous_on_click(self) -> None:
@@ -502,13 +526,24 @@ class Player(QMainWindow):
         layout.addLayout(self.__construct_mode_toggle())
         return widget
 
+    def __construct_artists_section(self) -> Viewer:
+        """Construct Artists section."""
+        self.__artists = Viewer()
+        self.__artists.widget.itemDoubleClicked.connect(self.__artists_on_double_click)
+        return self.__artists
+
+    def __construct_songs_section(self) -> Viewer:
+        """Construct Songs section."""
+        self.__songs = Viewer()
+        self.__songs.widget.itemDoubleClicked.connect(self.__songs_on_double_click)
+        return self.__songs
+
     def __construct_playlist(self) -> QHBoxLayout:
         """Construct track section."""
         layout: QHBoxLayout = QHBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
-        self.__viewer = Viewer()
-        self.__viewer.playlist.itemDoubleClicked.connect(self.__playlist_on_double_click)
-        layout.addWidget(self.__viewer)
+        layout.addWidget(self.__construct_artists_section(), stretch=1)
+        layout.addWidget(self.__construct_songs_section(), stretch=3)
         return layout
 
     def __construct_track(self) -> QHBoxLayout:

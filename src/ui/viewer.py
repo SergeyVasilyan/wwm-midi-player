@@ -12,17 +12,17 @@ class Viewer(QFrame):
     def __init__(self, parent: QWidget|None=None) -> None:
         """Initialize Viewer."""
         super().__init__(parent=parent)
-        self.__playlist: QListWidget = QListWidget(self)
+        self.__widget: QListWidget = QListWidget(self)
         self.__radius: int = 6
         layout: QVBoxLayout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self.__playlist)
+        layout.addWidget(self.__widget)
         self.set_style()
 
     @property
-    def playlist(self) -> QListWidget:
-        """Return playlist."""
-        return self.__playlist
+    def widget(self) -> QListWidget:
+        """Return widget."""
+        return self.__widget
 
     def set_style(self) -> None:
         """Override size hint."""
@@ -33,7 +33,7 @@ class Viewer(QFrame):
                 border: 1px solid {Colors.BACKGROUND.value.hex};
             }}
         """)
-        self.__playlist.setStyleSheet(f"""
+        self.__widget.setStyleSheet(f"""
             QListWidget {{
                 background-color: transparent;
                 border: none;
@@ -42,7 +42,7 @@ class Viewer(QFrame):
             }}
             QListWidget::item {{
                 background-color: transparent;
-                border-bottom: 1px solid #303030;
+                border-bottom: 1px solid {Colors.BACKGROUND_2.value.hex};
                 border-radius: {self.__radius}px;
                 padding: 6px;
             }}
@@ -51,7 +51,7 @@ class Viewer(QFrame):
                 border-left: 3px solid {Colors.ACCENT_1.value.hex};
             }}
             QListWidget::item:hover {{
-                background-color: #2A2A2A;
+                background-color: {Colors.BACKGROUND_2.value.hex};
                 border-radius: {self.__radius}px;
             }}
         """)
