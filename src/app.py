@@ -39,6 +39,7 @@ from ui.special import SpecialDialog
 from ui.toggle_switch import ToggleSwitch
 from ui.viewer import Viewer
 from ui.volume_slider import Volume
+from utils.common import Colors
 from utils.wwm_macro import IS_WINDOWS, KeyManager
 
 if IS_WINDOWS:
@@ -528,7 +529,7 @@ class Player(QMainWindow):
 
     def __construct_artists_section(self) -> Viewer:
         """Construct Artists section."""
-        self.__artists = Viewer()
+        self.__artists = Viewer(accent=Colors.ACCENT_2)
         self.__artists.widget.itemDoubleClicked.connect(self.__artists_on_double_click)
         return self.__artists
 
