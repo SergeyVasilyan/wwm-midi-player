@@ -11,6 +11,7 @@ from typing import override
 import keyboard
 import mido
 import tinysoundfont
+import win32gui
 from PySide6.QtCore import QRect, QSize, QThread, QTimer, Signal, Slot
 from PySide6.QtGui import QAction, QCloseEvent, QGuiApplication, QIcon, Qt
 from PySide6.QtWidgets import (
@@ -39,11 +40,10 @@ from ui.special import SpecialDialog
 from ui.toggle_switch import ToggleSwitch
 from ui.viewer import Viewer
 from ui.volume_slider import Volume
-from utils.common import Colors
-from utils.wwm_macro import IS_WINDOWS, KeyManager
-
-if IS_WINDOWS:
-    import win32gui
+from utils.common import Colors, resource_path
+from utils.midi_timing import calculate_duration
+from utils.playlist import next_track_index
+from utils.wwm_macro import KeyManager
 
 
 class Worker(QThread):
@@ -51,6 +51,7 @@ class Worker(QThread):
 
     duration_ready: Signal = Signal(float)
     error: Signal = Signal(str)
+    track_ended: Signal = Signal()
 
     def __init__(self, filename: str, soundfont: str, is_audio: bool=False) -> None:
         """Initialize worker."""
@@ -68,64 +69,9 @@ class Worker(QThread):
         """Return pause state."""
         return self.__paused
 
-    def __build_tempo_map(self, midi: mido.MidiFile) -> list[tuple[int, int]]:
-        """Return a list of (abs_tick, tempo_microsec_per_beat), sorted by abs_tick.
-
-        Default tempo is 500_000 (120 BPM). Tempo messages are taken from all tracks,
-        but commonly live in track 0.
-        """
-        tempo_map: list[tuple[int, int]] = [(0, 500_000)]
-        for track in midi.tracks:
-            abs_ticks: int = 0
-            for msg in track:
-                abs_ticks += msg.time
-                if msg.type == "set_tempo":
-                    tempo_map.append((abs_ticks, msg.tempo))
-        clean_tempo_map: dict[int, int] = {}
-        for tick, tempo in tempo_map:
-            clean_tempo_map[tick] = tempo
-        return sorted(clean_tempo_map.items())
-
-    def __find_max_end_tick(self, midi: mido.MidiFile) -> int:
-        """Find max end tick value."""
-        max_end_tick: int = 0
-        for track in midi.tracks:
-            abs_ticks: int = 0
-            has_notes: bool = False
-            for msg in track:
-                abs_ticks += msg.time
-                if msg.type in ("note_on", "note_off"):
-                    has_notes = True
-            if has_notes:
-                max_end_tick = max(max_end_tick, abs_ticks)
-        return max_end_tick
-
-    def __ticks_to_seconds(self, midi: mido.MidiFile, max_end_tick: int,
-                                 tempo_map: list[tuple[int, int]]) -> float:
-        """Convert an absolute tick position to seconds by walking the tempo segments."""
-        ticks_per_beat: int = midi.ticks_per_beat
-        total_seconds: float = 0.0
-        previous_tick, previous_tempo = tempo_map[0]
-        for tick, tempo in tempo_map[1:]:
-            segment_end: int = min(max_end_tick, tick)
-            if segment_end > previous_tick:
-                segment_ticks: int = segment_end - previous_tick
-                total_seconds += mido.tick2second(segment_ticks, ticks_per_beat, previous_tempo)
-                previous_tick = segment_end
-            if max_end_tick <= tick:
-                return total_seconds
-            previous_tempo = tempo
-        if max_end_tick > previous_tick:
-            segment_ticks: int = max_end_tick - previous_tick
-            total_seconds += mido.tick2second(segment_ticks, ticks_per_beat, previous_tempo)
-        return total_seconds
-
-    def __calculate_duration(self) -> None:
+    def __calculate_duration(self, midi: mido.MidiFile) -> None:
         """Calculate overall duration."""
-        midi: mido.MidiFile = mido.MidiFile(self.__filename)
-        tempo_map: list[tuple[int, int]] = self.__build_tempo_map(midi)
-        max_end_tick: int = self.__find_max_end_tick(midi)
-        self.duration_ready.emit(self.__ticks_to_seconds(midi, max_end_tick, tempo_map))
+        self.duration_ready.emit(calculate_duration(midi))
 
     def __add_note(self, synth: tinysoundfont.Synth, msg: mido.Message, chord_notes: list[int],
                          velocities: list[int]) -> None:
@@ -163,47 +109,59 @@ class Worker(QThread):
         except mido.midifiles.meta.KeySignatureError:
             self.error.emit("Invalid MIDI File.\nPlease select valid MIDI file.")
             return
+        except Exception as exc:  # noqa: BLE001 - surface any parse failure to the UI
+            self.error.emit(f"Failed to load MIDI file.\n{exc}")
+            return
         synth: tinysoundfont.Synth = tinysoundfont.Synth()
         handle: int = 0
         if self.__is_audio:
             synth.start()
             synth.program_select(0, synth.sfload(self.__soundfont), 0, 0)
-        elif IS_WINDOWS:
+        else:
             handle = win32gui.FindWindow(None, "Where Winds Meet")
             if not handle:
                 self.error.emit("Where Winds Meet is not running.\n"
                                 "Please run the game then try again.")
                 return
         tick_events: list[mido.Message] = []
-        self.__calculate_duration()
-        current_song_time: float = .0
-        start_time: float = time.perf_counter()
-        for msg in player:
-            if not self.__running:
-                break
-            if self.__paused:
-                if self.__is_audio:
-                    for i in range(16):
-                        synth.control_change(i, 123, 0)
-                pause_start: float = time.perf_counter()
-                while self.__paused and self.__running:
-                    time.sleep(0.05)
-                start_time += (time.perf_counter() - pause_start)
-            current_song_time += msg.time
-            while self.__running:
-                elapsed: float = (time.perf_counter() - start_time)
-                if elapsed >= current_song_time:
+        natural_end: bool = True
+        try:
+            self.__calculate_duration(player)
+            current_song_time: float = .0
+            start_time: float = time.perf_counter()
+            for msg in player:
+                if not self.__running:
+                    natural_end = False
                     break
-                time.sleep(min(0.001, current_song_time - elapsed))
-            if msg.type in ("note_on", "note_off"):
-                tick_events = [msg]
-                self.__flush_tick_events(handle, synth, tick_events)
-            elif msg.type == "control_change" and self.__is_audio:
-                synth.control_change(0, msg.control, msg.value)
-            if self.__is_audio:
-                synth.control_change(0, 7, self.__volume)
-        self.__flush_tick_events(handle, synth, tick_events)
-        synth.stop()
+                if self.__paused:
+                    if self.__is_audio:
+                        for i in range(16):
+                            synth.control_change(i, 123, 0)
+                    pause_start: float = time.perf_counter()
+                    while self.__paused and self.__running:
+                        time.sleep(0.05)
+                    start_time += (time.perf_counter() - pause_start)
+                current_song_time += msg.time
+                while self.__running:
+                    elapsed: float = (time.perf_counter() - start_time)
+                    if elapsed >= current_song_time:
+                        break
+                    time.sleep(min(0.001, current_song_time - elapsed))
+                if msg.type in ("note_on", "note_off"):
+                    tick_events = [msg]
+                    self.__flush_tick_events(handle, synth, tick_events)
+                elif msg.type == "control_change" and self.__is_audio:
+                    synth.control_change(0, msg.control, msg.value)
+                if self.__is_audio:
+                    synth.control_change(0, 7, self.__volume)
+            self.__flush_tick_events(handle, synth, tick_events)
+        except Exception as exc:  # noqa: BLE001 - surface any playback failure to the UI
+            natural_end = False
+            self.error.emit(f"Playback error.\n{exc}")
+        finally:
+            synth.stop()
+        if natural_end:
+            self.track_ended.emit()
 
     def stop(self) -> None:
         """Stop worker."""
@@ -228,9 +186,9 @@ class Player(QMainWindow):
         self.__files: list[str] = []
         self.__current_index: int = -1
         self.__thread: Worker|None = None
-        self.__soundfont: Path = Path("GeneralUser.sf2")
-        if not self.__soundfont.exists():
-            self.__soundfont = "_internal" / self.__soundfont
+        self.__repeat: bool = False
+        self.__shuffle: bool = False
+        self.__soundfont: Path = resource_path("GeneralUser.sf2")
         self.__file: QLabel = QLabel("No files loaded")
         self.__file.setStyleSheet("font-weight: bold;")
         self.__progressbar: ProgressBar = ProgressBar()
@@ -309,6 +267,7 @@ class Player(QMainWindow):
                                is_audio)
         self.__thread.duration_ready.connect(self.__duration_ready)
         self.__thread.error.connect(self.__show_error)
+        self.__thread.track_ended.connect(self.__on_track_ended)
         self.__thread.finished.connect(lambda: self.__play.change.emit(False))
         self.__thread.start()
         self.__file.setText(self.__songs.widget.currentItem().text().split(".")[0])
@@ -393,11 +352,30 @@ class Player(QMainWindow):
         else:
             self.__start_playback()
 
+    def __next_index(self) -> int|None:
+        """Return the index to advance to, honoring shuffle/repeat, or None to stop."""
+        return next_track_index(self.__current_index, len(self.__files),
+                                 shuffle=self.__shuffle, repeat=self.__repeat)
+
     def __next_on_click(self) -> None:
         """Next button on click callback."""
-        if self.__files and self.__current_index < len(self.__files) - 1:
-            self.__current_index += 1
+        index: int|None = self.__next_index()
+        if index is not None:
+            self.__current_index = index
             self.__start_playback()
+
+    @Slot()
+    def __on_track_ended(self) -> None:
+        """Advance to the next track when the current one finishes on its own."""
+        self.__next_on_click()
+
+    def __set_repeat(self, checked: bool) -> None:
+        """Toggle repeat-playlist mode."""
+        self.__repeat = checked
+
+    def __set_shuffle(self, checked: bool) -> None:
+        """Toggle shuffle mode."""
+        self.__shuffle = checked
 
     def __set_volume(self, value: int) -> None:
         """Adjust FluidSynth volume gain."""
@@ -463,12 +441,19 @@ class Player(QMainWindow):
         previous_action: QAction = QAction("Previous", parent=self)
         play_action: QAction = QAction("Play/Pause", self)
         next_action: QAction = QAction("Next", self)
+        repeat_action: QAction = QAction("Repeat", self, checkable=True)
+        shuffle_action: QAction = QAction("Shuffle", self, checkable=True)
         previous_action.triggered.connect(self.__previous_on_click)
         play_action.triggered.connect(self.__play_on_click)
         next_action.triggered.connect(self.__next_on_click)
+        repeat_action.toggled.connect(self.__set_repeat)
+        shuffle_action.toggled.connect(self.__set_shuffle)
         menu.addAction(previous_action)
         menu.addAction(play_action)
         menu.addAction(next_action)
+        menu.addSeparator()
+        menu.addAction(repeat_action)
+        menu.addAction(shuffle_action)
 
     def __construct_setting_menu(self) -> None:
         """Construct settings menu."""
@@ -597,9 +582,7 @@ class Player(QMainWindow):
 if __name__ == "__main__":
     app: QApplication = QApplication(sys.argv)
     app.setApplicationName("WWM MIDI Player")
-    icon: Path = Path("src/input/logo.ico")
-    if not icon.exists():
-        icon = "_internal" / icon
+    icon: Path = resource_path("src/input/logo.ico")
     app.setWindowIcon(QIcon(icon.as_posix()))
     window: Player = Player()
     window.show()

@@ -25,7 +25,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
-    "Operating System :: OS Independent",
+    "Operating System :: Microsoft :: Windows",
     "Topic :: Games/Entertainment",
 ]
 
@@ -33,9 +33,8 @@ dependencies = [
     "pyside6>=6.10.2",
     "mido>=1.3.3",
     "keyboard>=0.13.5",
-    "pyaudio>=0.2.14",
     "tinysoundfont>=0.3.7",
-    "pywin32>=311; platform_system == 'Windows'",
+    "pywin32>=311",
 ]
 
 [project.optional-dependencies]
@@ -43,6 +42,7 @@ dev = [
     "ruff>=0.15.2",
     "pre-commit>=4.5.1",
     "pyinstaller>=6.18.0",
+    "pytest>=8.3.0",
 ]
 all = [
     "wwm-midi-player[dev]"
@@ -99,6 +99,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
+"tests/*" = ["D"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["ui", "utils"]
@@ -112,3 +113,7 @@ skip-magic-trailing-comma = false
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

@@ -1,13 +1,26 @@
 """Common functionality used by different modules."""
 
-import platform
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 
 from PySide6.QtGui import QColor
 
-IS_WINDOWS: bool = platform.system() == "Windows"
+
+def resource_path(path: str) -> Path:
+    """Resolve a bundled resource path for both source and PyInstaller onedir builds.
+
+    PyInstaller's onedir build collects data files under an ``_internal`` directory
+    next to the executable, while running from source resolves paths relative to the
+    working directory. Callers pass a path as it exists in the source tree (e.g.
+    ``"src/input/logo.ico"``); if that path doesn't exist and an ``_internal``
+    directory is present, the ``_internal``-prefixed location is returned instead.
+    """
+    resolved: Path = Path(path)
+    if resolved.exists() or not Path("_internal").is_dir():
+        return resolved
+    return Path("_internal") / resolved
 
 class Singleton(type):
     """Singleton implementation."""

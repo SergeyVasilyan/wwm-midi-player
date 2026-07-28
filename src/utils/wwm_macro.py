@@ -5,15 +5,12 @@ from copy import deepcopy
 from enum import IntEnum
 from pathlib import Path
 
+import win32api
+import win32con
 from PySide6.QtCore import Slot
 
-from utils.common import IS_WINDOWS, Singleton
+from utils.common import Singleton, resource_path
 
-if IS_WINDOWS:
-    import win32api
-    import win32con
-else:
-    import keyboard
 
 class KeyManager(metaclass=Singleton):
     """WWM Key binding manager."""
@@ -73,10 +70,7 @@ class KeyManager(metaclass=Singleton):
             "high": 72,  # C5
         }
         self.__mapping: dict[int, str] = {}
-        self.__cache: Path = Path("src/input/keybindings.json")
-        internal: Path = Path("_internal/")
-        if internal.exists():
-            self.__cache = internal / self.__cache
+        self.__cache: Path = resource_path("src/input/keybindings.json")
         self.__load_keybindings()
         self.__build_map()
 
@@ -188,10 +182,7 @@ class KeyManager(metaclass=Singleton):
     def play_note(self, handle: int, note: int) -> None:
         """Play note."""
         if key := self.__get_note(note):
-            if IS_WINDOWS:
-                self.__send_keypress_to_window(handle, key)
-            else:
-                keyboard.send(key.lower())
+            self.__send_keypress_to_window(handle, key)
 
     def play_chord(self, handle: int, notes: list[int]) -> None:
         """Play chord."""
