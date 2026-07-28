@@ -7,7 +7,10 @@ name = "wwm-midi-player"
 version = "1.4.0"
 description = "A simple application for playing MIDI files in WWM"
 readme = "README.md"
-requires-python = ">=3.11"
+# Capped below 3.14: pyaudio (a transitive dependency via tinysoundfont) has no
+# official prebuilt Windows wheel for 3.14 yet, and building it from source
+# requires a vcpkg-provided portaudio.
+requires-python = ">=3.11,<3.14"
 license = { text = "GPL-3.0-or-later" }
 authors = [
     { name = "Sergey Vasilyan" }
