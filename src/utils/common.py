@@ -60,3 +60,16 @@ class Colors(Enum):
     BLUE = Color("#0000FF")
     BLACK = Color("#000000")
     WHITE = Color("#FFFFFF")
+
+# Shared corner-radius scale, applied consistently across panels/dialogs.
+RADIUS_SM: int = 6
+RADIUS_MD: int = 10
+
+# Shared spacing scale, applied consistently for margins/spacing in layouts.
+SPACING_XS: int = 4
+SPACING_SM: int = 8
+SPACING_MD: int = 12
+SPACING_LG: int = 16
+
+TITLEBAR_HEIGHT: int = 32
+RESIZE_MARGIN: int = 6

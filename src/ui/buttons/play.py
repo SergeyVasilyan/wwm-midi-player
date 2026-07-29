@@ -2,15 +2,17 @@
 
 from typing import override
 
-from PySide6.QtCore import QEasingCurve, QPointF, QRectF, QSize, Qt, QVariantAnimation, Signal, Slot
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal, Slot
 from PySide6.QtGui import QBrush, QColor, QPainter, QPaintEvent
 from PySide6.QtWidgets import QWidget
 
+from ui.animation import AnimatedProgress
 from ui.buttons.abstract import AbstractButton
 
 PRIMARY_SIZE = QSize(52, 52)
 PRIMARY_BACKGROUND_ALPHA = 255
 GLYPH_COLOR = QColor("#FFFFFF")
+MORPH_ANIMATION_DURATION_MS = 400
 
 
 class PlayButton(AbstractButton):
@@ -22,14 +24,13 @@ class PlayButton(AbstractButton):
         """Initialize Play/Pause Button widget."""
         super().__init__(parent=parent, size=PRIMARY_SIZE)
         self.__is_playing: bool = False
-        self.__animation: QVariantAnimation = QVariantAnimation(self)
-        self.__animation.setDuration(400)
-        self.__animation.setStartValue(0.0)
-        self.__animation.setEndValue(1.0)
-        self.__animation.setEasingCurve(QEasingCurve.Type.InOutCubic)
-        self.__animation.valueChanged.connect(self.update)
-        self.__morph: float = 0.0
+        self.__morph: AnimatedProgress = AnimatedProgress(
+            self, self.__on_morph_changed, MORPH_ANIMATION_DURATION_MS)
         self.change.connect(self.__toggle_state)
+
+    def __on_morph_changed(self, _value: float) -> None:
+        """Repaint as the play/pause morph animation progresses."""
+        self.update()
 
     @Slot(bool)
     def __toggle_state(self, new_state: bool) -> None:
@@ -37,11 +38,7 @@ class PlayButton(AbstractButton):
         if self.__is_playing == new_state:
             return
         self.__is_playing = new_state
-        if self.__is_playing:
-            self.__animation.setDirection(QVariantAnimation.Direction.Forward)
-        else:
-            self.__animation.setDirection(QVariantAnimation.Direction.Backward)
-        self.__animation.start()
+        self.__morph.animate_to(1.0 if new_state else 0.0)
 
     @override
     def paintEvent(self, _event: QPaintEvent) -> None:
@@ -55,14 +52,12 @@ class PlayButton(AbstractButton):
         rect: QRectF = circle.adjusted(circle.width() * 0.30, circle.height() * 0.26,
                                        -circle.width() * 0.30, -circle.height() * 0.26)
         painter.setBrush(QBrush(GLYPH_COLOR))
-        self.__morph = 1.0 if self.__is_playing else 0.0
-        if self.__animation.state() == self.__animation.State.Running:
-            self.__morph = self.__animation.currentValue()
-        if self.__morph < 0.5:
+        morph: float = self.__morph.value
+        if morph < 0.5:
             p1: QPointF = rect.bottomLeft()
             p2: QPointF = rect.topLeft()
             p3: QPointF = QPointF(rect.right(), rect.center().y())
-            p3.setX(p3.x() - (p3.x() - rect.center().x()) * (self.__morph * 2))
+            p3.setX(p3.x() - (p3.x() - rect.center().x()) * (morph * 2))
             painter.drawPolygon([p1, p2, p3])
         else:
             bar_width: float = rect.width() / 3
@@ -70,7 +65,7 @@ class PlayButton(AbstractButton):
             left_bar: QRectF = QRectF(rect.left(), rect.top(), bar_width, rect.height())
             right_bar: QRectF = QRectF(rect.left() + bar_width + gap, rect.top(), bar_width,
                                       rect.height())
-            factor: float = (self.__morph - 0.5) * 2
+            factor: float = (morph - 0.5) * 2
             left_bar.setWidth(left_bar.width() * factor)
             right_bar.setWidth(right_bar.width() * factor)
             painter.drawRect(left_bar)

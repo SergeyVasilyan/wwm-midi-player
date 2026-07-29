@@ -11,8 +11,17 @@ import keyboard
 import mido
 import tinysoundfont
 import win32gui
-from PySide6.QtCore import QRect, QSize, QThread, QTimer, Signal, Slot
-from PySide6.QtGui import QAction, QCloseEvent, QColor, QFont, QGuiApplication, QIcon, Qt
+from PySide6.QtCore import QPoint, QRect, QSize, QThread, QTimer, Signal, Slot
+from PySide6.QtGui import (
+    QAction,
+    QCloseEvent,
+    QColor,
+    QFont,
+    QGuiApplication,
+    QIcon,
+    QMouseEvent,
+    Qt,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -36,16 +45,19 @@ from ui.buttons.previous import PreviousButton
 from ui.buttons.repeat import RepeatButton
 from ui.buttons.shuffle import ShuffleButton
 from ui.progressbar import ProgressBar
+from ui.search_box import SearchBox
 from ui.settings import SettingsDialog
 from ui.special import SpecialDialog
+from ui.titlebar import TitleBar
 from ui.toast import Toast
 from ui.toggle_switch import ToggleSwitch
 from ui.viewer import Viewer
 from ui.volume_slider import Volume
-from utils.common import Colors, resource_path
+from utils.common import RESIZE_MARGIN, SPACING_MD, Colors, resource_path
 from utils.midi_timing import calculate_duration
 from utils.playlist import next_track_index
 from utils.track_info import TrackInfo, parse_track_info
+from utils.window_geometry import compute_resize_edges
 from utils.wwm_macro import KeyManager
 
 
@@ -184,8 +196,11 @@ class Player(QMainWindow):
     def __init__(self) -> None:
         """Initialize MIDI Player."""
         super().__init__()
+        self.setWindowFlags(self.windowFlags() | Qt.WindowType.FramelessWindowHint)
+        self.setMouseTracking(True)
         screen_size: QRect = QGuiApplication.primaryScreen().availableGeometry()
         self.setMinimumSize(QSize(screen_size.width() // 2, screen_size.height() // 2))
+        self.__resize_edges: Qt.Edge = Qt.Edge(0)
         self.__files: list[str] = []
         self.__current_index: int = -1
         self.__thread: Worker|None = None
@@ -215,6 +230,8 @@ class Player(QMainWindow):
         self.__repeat_action: QAction
         self.__shuffle_action: QAction
         self.__central_layout: QVBoxLayout
+        self.__title_bar: TitleBar
+        self.__menu_bar: QMenuBar
         self.__progress_timer: QTimer
         self.__construct_menu_bar()
         self.__construct_layout()
@@ -460,7 +477,7 @@ class Player(QMainWindow):
 
     def __construct_file_menu(self) -> None:
         """Construct file menu."""
-        menu_bar: QMenuBar = self.menuBar()
+        menu_bar: QMenuBar = self.__menu_bar
         menu: QMenu = menu_bar.addMenu("&File")
         open_action: QAction = QAction("Open MIDI file", self)
         save_action: QAction = QAction("Save Playlist", self)
@@ -481,7 +498,7 @@ class Player(QMainWindow):
 
     def __construct_playback_menu(self) -> None:
         """Construct playback menu."""
-        menu_bar: QMenuBar = self.menuBar()
+        menu_bar: QMenuBar = self.__menu_bar
         menu: QMenu = menu_bar.addMenu("&Playback")
         previous_action: QAction = QAction("Previous", parent=self)
         play_action: QAction = QAction("Play/Pause", self)
@@ -507,7 +524,7 @@ class Player(QMainWindow):
 
     def __construct_setting_menu(self) -> None:
         """Construct settings menu."""
-        menu_bar: QMenuBar = self.menuBar()
+        menu_bar: QMenuBar = self.__menu_bar
         menu: QMenu = menu_bar.addMenu("&Settings")
         settings_action: QAction = QAction("Settings", self)
         settings_action.triggered.connect(self.__show_settings)
@@ -515,7 +532,7 @@ class Player(QMainWindow):
 
     def __construct_help_menu(self) -> None:
         """Construct help menu."""
-        menu_bar: QMenuBar = self.menuBar()
+        menu_bar: QMenuBar = self.__menu_bar
         menu: QMenu = menu_bar.addMenu("&Help")
         about_action: QAction = QAction("About", self)
         about_action.triggered.connect(self.__show_about)
@@ -523,7 +540,7 @@ class Player(QMainWindow):
 
     def __construct_special_menu(self) -> None:
         """Construct special menu."""
-        menu_bar: QMenuBar = self.menuBar()
+        menu_bar: QMenuBar = self.__menu_bar
         menu: QMenu = menu_bar.addMenu("&Special")
         action: QAction = QAction("Thanks", self)
         action.triggered.connect(self.__show_special)
@@ -531,6 +548,7 @@ class Player(QMainWindow):
 
     def __construct_menu_bar(self) -> None:
         """Construct menu bar."""
+        self.__menu_bar = QMenuBar()
         self.__construct_file_menu()
         self.__construct_playback_menu()
         self.__construct_setting_menu()
@@ -571,8 +589,7 @@ class Player(QMainWindow):
 
     def __construct_search(self) -> QLineEdit:
         """Construct the song search box."""
-        self.__search = QLineEdit()
-        self.__search.setPlaceholderText("Search songs...")
+        self.__search = SearchBox()
         self.__search.textChanged.connect(self.__on_search_changed)
         return self.__search
 
@@ -636,12 +653,54 @@ class Player(QMainWindow):
 
     def __construct_layout(self) -> None:
         """Construct layout."""
-        widget: QWidget = QWidget()
-        self.setCentralWidget(widget)
-        self.__central_layout = QVBoxLayout(widget)
+        root: QWidget = QWidget()
+        self.setCentralWidget(root)
+        root_layout: QVBoxLayout = QVBoxLayout(root)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(0)
+        icon: QIcon = QIcon(resource_path("src/input/logo.ico").as_posix())
+        self.__title_bar = TitleBar(self, "WWM MIDI Player", icon)
+        root_layout.addWidget(self.__title_bar)
+        root_layout.addWidget(self.__menu_bar)
+        content: QWidget = QWidget()
+        self.__central_layout = QVBoxLayout(content)
+        self.__central_layout.setContentsMargins(SPACING_MD, SPACING_MD, SPACING_MD, SPACING_MD)
+        self.__central_layout.setSpacing(SPACING_MD)
         self.__central_layout.addLayout(self.__construct_playlist())
         self.__central_layout.addLayout(self.__construct_track())
         self.__central_layout.addLayout(self.__construct_controls())
+        root_layout.addWidget(content, stretch=1)
+
+    def __cursor_for_edges(self, edges: Qt.Edge) -> Qt.CursorShape:
+        """Map a resize-edge combination to the appropriate resize cursor shape."""
+        if edges in (Qt.Edge.LeftEdge, Qt.Edge.RightEdge):
+            return Qt.CursorShape.SizeHorCursor
+        if edges in (Qt.Edge.TopEdge, Qt.Edge.BottomEdge):
+            return Qt.CursorShape.SizeVerCursor
+        if edges in (Qt.Edge.LeftEdge | Qt.Edge.TopEdge, Qt.Edge.RightEdge | Qt.Edge.BottomEdge):
+            return Qt.CursorShape.SizeFDiagCursor
+        if edges in (Qt.Edge.RightEdge | Qt.Edge.TopEdge, Qt.Edge.LeftEdge | Qt.Edge.BottomEdge):
+            return Qt.CursorShape.SizeBDiagCursor
+        return Qt.CursorShape.ArrowCursor
+
+    @override
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        """Update cursor shape and pending resize edges based on proximity to window edges."""
+        pos: QPoint = event.position().toPoint()
+        self.__resize_edges = compute_resize_edges((pos.x(), pos.y()),
+                                                    (self.width(), self.height()), RESIZE_MARGIN)
+        self.setCursor(self.__cursor_for_edges(self.__resize_edges))
+        super().mouseMoveEvent(event)
+
+    @override
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        """Start an OS-native resize if the press is near a window edge."""
+        if self.__resize_edges != Qt.Edge(0) and event.button() == Qt.MouseButton.LeftButton:
+            handle = self.windowHandle()
+            if handle is not None:
+                handle.startSystemResize(self.__resize_edges)
+                return
+        super().mousePressEvent(event)
 
     @override
     def closeEvent(self, event: QCloseEvent, /) -> None:

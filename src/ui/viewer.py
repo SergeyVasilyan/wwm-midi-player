@@ -3,7 +3,8 @@
 
 from PySide6.QtWidgets import QFrame, QListWidget, QVBoxLayout, QWidget
 
-from utils.common import Colors
+from ui.song_delegate import SongDelegate
+from utils.common import RADIUS_MD, Colors
 
 
 class Viewer(QFrame):
@@ -13,7 +14,8 @@ class Viewer(QFrame):
         """Initialize Viewer."""
         super().__init__(parent=parent)
         self.__widget: QListWidget = QListWidget(self)
-        self.__radius: int = 10
+        self.__widget.setItemDelegate(SongDelegate(self.__widget, self.__widget))
+        self.__radius: int = RADIUS_MD
         self.__accent: Colors = accent
         layout: QVBoxLayout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -50,10 +52,6 @@ class Viewer(QFrame):
             QListWidget::item:selected {{
                 background-color: transparent;
                 border-left: 3px solid {self.__accent.value.hex};
-            }}
-            QListWidget::item:hover {{
-                background-color: {Colors.BACKGROUND_2.value.hex};
-                border-radius: {self.__radius}px;
             }}
         """)
 

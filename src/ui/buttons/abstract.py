@@ -2,10 +2,11 @@
 
 from typing import override
 
-from PySide6.QtCore import QEasingCurve, QEvent, QRectF, QSize, Qt, QVariantAnimation
+from PySide6.QtCore import QEvent, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QEnterEvent, QMouseEvent
 from PySide6.QtWidgets import QPushButton, QWidget
 
+from ui.animation import AnimatedProgress
 from utils.common import Colors
 
 DEFAULT_SIZE = QSize(36, 36)
@@ -31,26 +32,19 @@ class AbstractButton(QPushButton):
         self.setFixedSize(size)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self._color: QColor = Colors.ACCENT_1.value.qcolor
-        self.__hover_progress: float = 0.0
-        self.__press_progress: float = 0.0
-        self.__hover_animation: QVariantAnimation = self.__make_animation(
-            HOVER_ANIMATION_DURATION_MS)
-        self.__hover_animation.valueChanged.connect(self.__on_hover_progress_changed)
-        self.__press_animation: QVariantAnimation = self.__make_animation(
-            PRESS_ANIMATION_DURATION_MS)
-        self.__press_animation.valueChanged.connect(self.__on_press_progress_changed)
+        self.__hover: AnimatedProgress = AnimatedProgress(
+            self, self.__on_progress_changed, HOVER_ANIMATION_DURATION_MS)
+        self.__press: AnimatedProgress = AnimatedProgress(
+            self, self.__on_progress_changed, PRESS_ANIMATION_DURATION_MS)
         self.set_style()
 
-    def __make_animation(self, duration_ms: int) -> QVariantAnimation:
-        """Construct a 0..1 QVariantAnimation with the standard easing curve."""
-        animation: QVariantAnimation = QVariantAnimation(self)
-        animation.setDuration(duration_ms)
-        animation.setEasingCurve(QEasingCurve.Type.InOutCubic)
-        return animation
+    def _hover_progress(self) -> float:
+        """Return the current hover animation progress (0..1)."""
+        return self.__hover.value
 
     def _scale_factor(self) -> float:
         """Combined hover-grow / press-shrink scale, centered at 1.0."""
-        return 1.0 + HOVER_GROW * self.__hover_progress - PRESS_SHRINK * self.__press_progress
+        return 1.0 + HOVER_GROW * self.__hover.value - PRESS_SHRINK * self.__press.value
 
     def _scaled_rect(self, margin: float=3.0) -> QRectF:
         """Return the button's drawable area, inset by margin and scaled for hover/press."""
@@ -64,8 +58,8 @@ class AbstractButton(QPushButton):
     def _background_color(self, alpha: int, base: QColor|None=None) -> QColor:
         """Return the shape's fill color at the given base alpha, brightened on hover."""
         color: QColor = QColor(base if base is not None else self._color)
-        if self.__hover_progress > 0:
-            color = color.lighter(100 + int(25 * self.__hover_progress))
+        if self.__hover.value > 0:
+            color = color.lighter(100 + int(25 * self.__hover.value))
         color.setAlpha(alpha)
         return color
 
@@ -76,49 +70,36 @@ class AbstractButton(QPushButton):
         alpha/etc. without corrupting shared Colors enum values.
         """
         color: QColor = QColor(base if base is not None else self._color)
-        if self.__hover_progress > 0:
-            return color.lighter(100 + int(20 * self.__hover_progress))
+        if self.__hover.value > 0:
+            return color.lighter(100 + int(20 * self.__hover.value))
         return color
 
-    def __on_hover_progress_changed(self, value: float) -> None:
-        """Repaint as the hover animation progresses."""
-        self.__hover_progress = value
+    def __on_progress_changed(self, _value: float) -> None:
+        """Repaint as a hover/press animation progresses."""
         self.update()
-
-    def __on_press_progress_changed(self, value: float) -> None:
-        """Repaint as the press animation progresses."""
-        self.__press_progress = value
-        self.update()
-
-    def __animate(self, animation: QVariantAnimation, current: float, target: float) -> None:
-        """Animate a 0..1 progress value from current toward target."""
-        animation.stop()
-        animation.setStartValue(current)
-        animation.setEndValue(target)
-        animation.start()
 
     @override
     def enterEvent(self, event: QEnterEvent) -> None:
         """Animate hover-in."""
-        self.__animate(self.__hover_animation, self.__hover_progress, 1.0)
+        self.__hover.animate_to(1.0)
         super().enterEvent(event)
 
     @override
     def leaveEvent(self, event: QEvent) -> None:
         """Animate hover-out."""
-        self.__animate(self.__hover_animation, self.__hover_progress, 0.0)
+        self.__hover.animate_to(0.0)
         super().leaveEvent(event)
 
     @override
     def mousePressEvent(self, event: QMouseEvent) -> None:
         """Animate press-in."""
-        self.__animate(self.__press_animation, self.__press_progress, 1.0)
+        self.__press.animate_to(1.0)
         super().mousePressEvent(event)
 
     @override
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         """Animate press-out."""
-        self.__animate(self.__press_animation, self.__press_progress, 0.0)
+        self.__press.animate_to(0.0)
         super().mouseReleaseEvent(event)
 
     def set_style(self) -> None:
