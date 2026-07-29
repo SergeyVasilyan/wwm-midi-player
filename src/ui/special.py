@@ -10,6 +10,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ui.dialog_style import apply_dialog_theme
+
 
 class SpecialDialog(QDialog):
     """Special Dialog."""
@@ -21,6 +23,7 @@ class SpecialDialog(QDialog):
             self.setWindowIcon(parent.windowIcon())
         self.setWindowTitle("Special")
         self.setModal(True)
+        apply_dialog_theme(self)
         self.__create_layout()
 
     def __create_layout(self) -> None:
@@ -28,7 +31,8 @@ class SpecialDialog(QDialog):
         layout: QGridLayout = QGridLayout()
         row: int = 0
         header: QLabel = QLabel("Special thanks to")
-        header.setStyleSheet("font-size: 14pt; font-weight: bold; padding-bottom: 8px;")
+        header.setStyleSheet(
+            "font-size: 14pt; font-weight: bold; padding-bottom: 8px; background: transparent;")
         layout.addWidget(header, row, 0, 1, -1, alignment=Qt.AlignmentFlag.AlignCenter)
         row += 1
         hearts: list[str] = ["💚", "🧡", "❤️", "🩷", "💛", "💙", "🩵", "💜", "🤎", "🖤", "🩶",

@@ -2,7 +2,7 @@
 
 from typing import override
 
-from PySide6.QtCore import QEvent, QPointF, QRectF, Qt
+from PySide6.QtCore import QEasingCurve, QEvent, QPointF, QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QEnterEvent, QLinearGradient, QPainter, QPaintEvent
 from PySide6.QtWidgets import QProgressBar, QWidget
 
@@ -13,6 +13,7 @@ HIT_AREA_HEIGHT = 18
 TRACK_HEIGHT = 6
 THUMB_RADIUS = 6.0
 THUMB_HOVER_DURATION_MS = 120
+FILL_ANIMATION_DURATION_MS = 950
 
 
 class ProgressBar(QProgressBar):
@@ -29,10 +30,32 @@ class ProgressBar(QProgressBar):
         self.setStyleSheet("QProgressBar { background: transparent; border: none; }")
         self.__thumb_reveal: AnimatedProgress = AnimatedProgress(
             self, self.__on_reveal_changed, THUMB_HOVER_DURATION_MS)
+        self.__fill: AnimatedProgress = AnimatedProgress(
+            self, self.__on_fill_changed, FILL_ANIMATION_DURATION_MS,
+            easing=QEasingCurve.Type.Linear)
 
     def __on_reveal_changed(self, _value: float) -> None:
         """Repaint as the thumb-reveal animation progresses."""
         self.update()
+
+    def __on_fill_changed(self, _value: float) -> None:
+        """Repaint as the fill animation progresses."""
+        self.update()
+
+    @override
+    def setValue(self, value: int) -> None:
+        """Set the progress value, animating the visual fill smoothly forward.
+
+        A backward jump (new track, error reset) snaps instantly instead of
+        visually rewinding.
+        """
+        old_fraction: float = self.__fraction()
+        super().setValue(value)
+        new_fraction: float = self.__fraction()
+        if new_fraction < old_fraction:
+            self.__fill.snap_to(new_fraction)
+        else:
+            self.__fill.animate_to(new_fraction)
 
     def __track_rect(self) -> QRectF:
         """Return the visual track rect, vertically centered in the hit area."""
@@ -63,9 +86,9 @@ class ProgressBar(QProgressBar):
         track: QRectF = self.__track_rect()
         radius: float = TRACK_HEIGHT / 2
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(Colors.BACKGROUND.value.hex))
+        painter.setBrush(QColor(Colors.BACKGROUND_2.value.hex))
         painter.drawRoundedRect(track, radius, radius)
-        fraction: float = self.__fraction()
+        fraction: float = self.__fill.value
         if fraction > 0:
             fill: QRectF = QRectF(track)
             fill.setWidth(track.width() * fraction)

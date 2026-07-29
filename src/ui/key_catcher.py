@@ -7,6 +7,8 @@ from PySide6.QtCore import Qt, Slot
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import QDialog, QGridLayout, QHBoxLayout, QLabel, QPushButton, QWidget
 
+from ui.dialog_style import apply_dialog_theme
+
 
 class KeyCatcher(QDialog):
     """Key Catcher dialog."""
@@ -16,6 +18,7 @@ class KeyCatcher(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Key Catcher")
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        apply_dialog_theme(self)
         self.__pressed_key: str = ""
         self.__label: QLabel
         self.__error_label: QLabel
@@ -41,11 +44,11 @@ class KeyCatcher(QDialog):
         row += 1
         self.__label = QLabel("Waiting....")
         self.__label.setStyleSheet("font-size: 14pt; padding: 0px 8xp; font-weight: bold;"
-                                   "color: yellow;")
+                                   "color: yellow; background: transparent;")
         layout.addWidget(self.__label, row, 0, 1, -1, alignment=Qt.AlignmentFlag.AlignCenter)
         row += 1
         self.__error_label = QLabel("Key is already assigned to another note")
-        self.__error_label.setStyleSheet("color: red;")
+        self.__error_label.setStyleSheet("color: red; background: transparent;")
         self.__error_label.hide()
         layout.addWidget(self.__error_label, row, 0, 1, -1, alignment=Qt.AlignmentFlag.AlignCenter)
         return row + 1

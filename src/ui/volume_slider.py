@@ -21,14 +21,14 @@ class Volume(QSlider):
         """Override size hint."""
         self.setStyleSheet(f"""
             QSlider::groove:horizontal {{
-                background: {Colors.BACKGROUND.value.hex};
-                border: 1px solid {Colors.ACCENT_2.value.hex};
+                background: {Colors.BACKGROUND_2.value.hex};
+                border: none;
                 border-radius: 4px;
                 height: 8px;
             }}
             QSlider::handle:horizontal {{
-                background: {Colors.ACCENT_1.value.hex};
-                border: 1px solid #C0A060;
+                background: {Colors.WHITE.value.hex};
+                border: none;
                 border-radius: 8px;
                 width: 16px;
                 height: 16px;
@@ -38,7 +38,10 @@ class Volume(QSlider):
                 background: #C0A060;
             }}
             QSlider::sub-page:horizontal {{
-                background: {Colors.ACCENT_1.value.hex};
+                background: qlineargradient(
+                    spread:pad, x1:0, y1:0, x2:1, y2:0,
+                    stop:0 {Colors.ACCENT_1.value.hex}, stop:1 #C0A060
+                );
                 border-radius: 4px;
             }}
         """)

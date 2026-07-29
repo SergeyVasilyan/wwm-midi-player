@@ -3,7 +3,6 @@
 import contextlib
 import sys
 import time
-from collections.abc import Callable
 from pathlib import Path
 from typing import override
 
@@ -11,12 +10,10 @@ import keyboard
 import mido
 import tinysoundfont
 import win32gui
-from PySide6.QtCore import QPoint, QRect, QSize, QThread, QTimer, Signal, Slot
+from PySide6.QtCore import QEvent, QPoint, QRect, QSize, QThread, QTimer, Signal, Slot
 from PySide6.QtGui import (
     QAction,
     QCloseEvent,
-    QColor,
-    QFont,
     QGuiApplication,
     QIcon,
     QMouseEvent,
@@ -25,35 +22,26 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
-    QGridLayout,
-    QHBoxLayout,
-    QLabel,
     QLineEdit,
     QListWidgetItem,
     QMainWindow,
     QMenu,
     QMenuBar,
     QMessageBox,
-    QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
-from ui.buttons.next import NextButton
 from ui.buttons.play import PlayButton
-from ui.buttons.previous import PreviousButton
-from ui.buttons.repeat import RepeatButton
-from ui.buttons.shuffle import ShuffleButton
-from ui.progressbar import ProgressBar
+from ui.now_playing_bar import NowPlayingBar
 from ui.search_box import SearchBox
 from ui.settings import SettingsDialog
+from ui.song_delegate import ARTIST_ROLE, TITLE_ROLE
 from ui.special import SpecialDialog
 from ui.titlebar import TitleBar
 from ui.toast import Toast
-from ui.toggle_switch import ToggleSwitch
 from ui.viewer import Viewer
-from ui.volume_slider import Volume
-from utils.common import RESIZE_MARGIN, SPACING_MD, Colors, resource_path
+from utils.common import RADIUS_SM, RESIZE_MARGIN, SPACING_MD, Colors, resource_path
 from utils.midi_timing import calculate_duration
 from utils.playlist import next_track_index
 from utils.track_info import TrackInfo, parse_track_info
@@ -206,27 +194,13 @@ class Player(QMainWindow):
         self.__thread: Worker|None = None
         self.__repeat: bool = False
         self.__shuffle: bool = False
-        self.__now_playing_item: QListWidgetItem|None = None
         self.__toast: Toast|None = None
         self.__soundfont: Path = resource_path("GeneralUser.sf2")
-        self.__title_label: QLabel = QLabel("No files loaded")
-        self.__title_label.setStyleSheet("font-weight: bold; font-size: 16px;")
-        self.__artist_label: QLabel = QLabel("")
-        self.__artist_label.setStyleSheet("color: #999999; font-size: 12px;")
-        self.__artist_label.setVisible(False)
-        self.__progressbar: ProgressBar = ProgressBar()
-        self.__mode_toggle: ToggleSwitch = ToggleSwitch()
-        self.__current_time: QLabel = QLabel("00:00")
-        self.__duration_time: QLabel = QLabel("00:00")
-        self.__current_time.setStyleSheet("font-weight: bold;")
-        self.__duration_time.setStyleSheet("font-weight: bold;")
         self.__current: int = 0
         self.__duration: int = 0
         self.__search: QLineEdit
         self.__songs: Viewer
-        self.__play: PlayButton
-        self.__repeat_button: RepeatButton
-        self.__shuffle_button: ShuffleButton
+        self.__now_playing_bar: NowPlayingBar
         self.__repeat_action: QAction
         self.__shuffle_action: QAction
         self.__central_layout: QVBoxLayout
@@ -235,35 +209,22 @@ class Player(QMainWindow):
         self.__progress_timer: QTimer
         self.__construct_menu_bar()
         self.__construct_layout()
-        self.__wire_repeat_shuffle_sync()
+        self.__wire_now_playing_bar()
         self.__bind_shortcuts()
-
-    @staticmethod
-    def __convert_to_mm_ss(seconds: int) -> tuple[int, int]:
-        """Convert seconds to humane format MM:SS."""
-        return divmod(seconds, 60)
-
-    def __set_header(self, title: str, artist: str="") -> None:
-        """Set the now-playing header text."""
-        self.__title_label.setText(title)
-        self.__artist_label.setText(artist)
-        self.__artist_label.setVisible(bool(artist))
 
     def __bind_shortcuts(self) -> None:
         """Bind shortcuts."""
         keyboard.add_hotkey("f9", self.__previous_on_click)
-        keyboard.add_hotkey("f10", self.__play.click)
+        keyboard.add_hotkey("f10", self.__now_playing_bar.play_button.click)
         keyboard.add_hotkey("f11", self.__next_on_click)
-        keyboard.add_hotkey("f8", self.__mode_toggle.toggle)
+        keyboard.add_hotkey("f8", self.__now_playing_bar.mode_toggle.toggle)
 
     @Slot(float)
     def __duration_ready(self, duration: float) -> None:
         """Set duration and start timer."""
         self.__current = 0
         self.__duration = int(duration)
-        minutes, seconds = self.__convert_to_mm_ss(self.__duration)
-        self.__duration_time.setText(f"{minutes}:{seconds:02d}")
-        self.__progressbar.setMaximum(self.__duration)
+        self.__now_playing_bar.set_duration(self.__duration)
         with contextlib.suppress(AttributeError):
             self.__progress_timer.stop()
         self.__progress_timer = QTimer(self)
@@ -275,9 +236,7 @@ class Player(QMainWindow):
         """Update progress."""
         if self.__thread and self.__thread.paused:
             return
-        self.__progressbar.setValue(self.__current)
-        minutes, seconds = self.__convert_to_mm_ss(self.__current)
-        self.__current_time.setText(f"{minutes}:{seconds:02d}")
+        self.__now_playing_bar.set_current_time(self.__current)
         if self.__current >= self.__duration:
             self.__progress_timer.stop()
             return
@@ -297,44 +256,31 @@ class Player(QMainWindow):
         """Show error message and stop counter."""
         with contextlib.suppress(AttributeError):
             self.__progress_timer.stop()
-        self.__progressbar.setValue(0)
-        self.__current_time.setText("00:00")
+        self.__now_playing_bar.reset_progress()
         if self.__toast is not None:
             self.__on_toast_dismissed()
         self.__toast = Toast(msg, self)
         self.__toast.dismissed.connect(self.__on_toast_dismissed)
         self.__central_layout.insertWidget(0, self.__toast)
 
-    def __mark_now_playing(self, item: QListWidgetItem) -> None:
-        """Mark item as the now-playing track, independent of list selection."""
-        if self.__now_playing_item is not None:
-            self.__now_playing_item.setFont(QFont())
-            self.__now_playing_item.setBackground(Qt.BrushStyle.NoBrush)
-        font: QFont = item.font()
-        font.setBold(True)
-        item.setFont(font)
-        tint: QColor = QColor(Colors.ACCENT_1.value.qcolor)
-        tint.setAlpha(60)
-        item.setBackground(tint)
-        self.__now_playing_item = item
-
     def __start_playback(self) -> None:
         """Start playback."""
         if self.__thread and self.__thread.isRunning():
             self.__thread.stop()
             self.__thread.wait()
-        self.__play.change.emit(True)
-        self.__mark_now_playing(self.__songs.widget.item(self.__current_index))
-        is_audio: bool = self.__mode_toggle.isChecked()
+        self.__now_playing_bar.play_button.change.emit(True)
+        self.__songs.set_now_playing_row(self.__current_index)
+        is_audio: bool = self.__now_playing_bar.mode_toggle.isChecked()
         self.__thread = Worker(self.__files[self.__current_index], self.__soundfont.as_posix(),
                                is_audio)
         self.__thread.duration_ready.connect(self.__duration_ready)
         self.__thread.error.connect(self.__show_error)
         self.__thread.track_ended.connect(self.__on_track_ended)
-        self.__thread.finished.connect(lambda: self.__play.change.emit(False))
+        play_button: PlayButton = self.__now_playing_bar.play_button
+        self.__thread.finished.connect(lambda: play_button.change.emit(False))
         self.__thread.start()
         info: TrackInfo = parse_track_info(Path(self.__files[self.__current_index]).name)
-        self.__set_header(info.title, info.artist)
+        self.__now_playing_bar.set_header(info.title, info.artist)
 
     def __songs_on_double_click(self, item: QListWidgetItem) -> None:
         """Play track when double-clicked in song."""
@@ -363,9 +309,14 @@ class Player(QMainWindow):
         if self.__current_index == -1:
             self.__current_index = 0
         self.__songs.widget.clear()
-        self.__now_playing_item = None
+        self.__songs.set_now_playing_row(-1)
         for f in self.__files:
-            self.__songs.widget.addItem(Path(f).name)
+            file_name: str = Path(f).name
+            info: TrackInfo = parse_track_info(file_name)
+            item: QListWidgetItem = QListWidgetItem(file_name)
+            item.setData(TITLE_ROLE, info.title)
+            item.setData(ARTIST_ROLE, info.artist)
+            self.__songs.widget.addItem(item)
         self.__on_search_changed(self.__search.text())
 
     def __clear_playlist(self) -> None:
@@ -377,12 +328,10 @@ class Player(QMainWindow):
             self.__progress_timer.stop()
         self.__files.clear()
         self.__current_index = -1
-        self.__now_playing_item = None
+        self.__songs.set_now_playing_row(-1)
         self.__songs.widget.clear()
-        self.__progressbar.setValue(0)
-        self.__current_time.setText("00:00")
-        self.__duration_time.setText("00:00")
-        self.__set_header("No files loaded")
+        self.__now_playing_bar.reset_progress()
+        self.__now_playing_bar.set_header("No files loaded")
 
     def __load_playlist(self) -> None:
         """Load playlist from file."""
@@ -393,7 +342,7 @@ class Player(QMainWindow):
             self.__files = [line.strip() for line in f if line.strip()]
         self.__current_index = -1
         self.__add_songs()
-        self.__set_header(f"Loaded playlist with {len(self.__files)} files.")
+        self.__now_playing_bar.set_header(f"Loaded playlist with {len(self.__files)} files.")
 
     def __browse_on_click(self) -> None:
         """Browse button on click callback: adds files to the current playlist."""
@@ -403,7 +352,8 @@ class Player(QMainWindow):
             return
         self.__files.extend(files)
         self.__add_songs()
-        self.__set_header(f"Added {len(files)} file(s). Playlist has {len(self.__files)} total.")
+        self.__now_playing_bar.set_header(
+            f"Added {len(files)} file(s). Playlist has {len(self.__files)} total.")
 
     def __previous_on_click(self) -> None:
         """Previous button on click callback."""
@@ -414,11 +364,11 @@ class Player(QMainWindow):
     def __play_on_click(self) -> None:
         """Play button on click callback."""
         if self.__current_index == -1 or not self.__files:
-            self.__set_header("Please load MIDI files first!")
-            self.__play.change.emit(False)
+            self.__now_playing_bar.set_header("Please load MIDI files first!")
+            self.__now_playing_bar.play_button.change.emit(False)
             return
         if self.__thread and self.__thread.isRunning():
-            self.__play.change.emit(self.__thread.paused)
+            self.__now_playing_bar.play_button.change.emit(self.__thread.paused)
             self.__thread.toggle_pause()
         else:
             self.__start_playback()
@@ -468,12 +418,16 @@ class Player(QMainWindow):
         dialog: SpecialDialog = SpecialDialog(self)
         dialog.exec()
 
-    def __construct_button(self, button: QPushButton, callback: Callable,
-                                 tooltip: str) -> QPushButton:
-        """Construct button."""
-        button.setToolTip(tooltip)
-        button.clicked.connect(callback)
-        return button
+    def __wire_now_playing_bar(self) -> None:
+        """Connect the Now Playing bar's buttons/controls to their callbacks."""
+        bar: NowPlayingBar = self.__now_playing_bar
+        bar.previous_button.clicked.connect(self.__previous_on_click)
+        bar.play_button.clicked.connect(self.__play_on_click)
+        bar.next_button.clicked.connect(self.__next_on_click)
+        bar.shuffle_button.toggled.connect(self.__set_shuffle)
+        bar.repeat_button.toggled.connect(self.__set_repeat)
+        bar.volume.valueChanged.connect(self.__set_volume)
+        self.__wire_repeat_shuffle_sync()
 
     def __construct_file_menu(self) -> None:
         """Construct file menu."""
@@ -517,10 +471,11 @@ class Player(QMainWindow):
 
     def __wire_repeat_shuffle_sync(self) -> None:
         """Keep the Repeat/Shuffle transport buttons and menu actions in sync."""
-        self.__repeat_action.toggled.connect(self.__repeat_button.setChecked)
-        self.__repeat_button.toggled.connect(self.__repeat_action.setChecked)
-        self.__shuffle_action.toggled.connect(self.__shuffle_button.setChecked)
-        self.__shuffle_button.toggled.connect(self.__shuffle_action.setChecked)
+        bar: NowPlayingBar = self.__now_playing_bar
+        self.__repeat_action.toggled.connect(bar.repeat_button.setChecked)
+        bar.repeat_button.toggled.connect(self.__repeat_action.setChecked)
+        self.__shuffle_action.toggled.connect(bar.shuffle_button.setChecked)
+        bar.shuffle_button.toggled.connect(self.__shuffle_action.setChecked)
 
     def __construct_setting_menu(self) -> None:
         """Construct settings menu."""
@@ -554,32 +509,35 @@ class Player(QMainWindow):
         self.__construct_setting_menu()
         self.__construct_help_menu()
         self.__construct_special_menu()
-
-    def __construct_volume_slider(self) -> QHBoxLayout:
-        """Construct volume slider."""
-        layout: QHBoxLayout = QHBoxLayout()
-        volume: Volume = Volume()
-        volume.valueChanged.connect(self.__set_volume)
-        layout.addWidget(QLabel("Volume"))
-        layout.addWidget(volume)
-        return layout
-
-    def __construct_mode_toggle(self) -> QHBoxLayout:
-        """Construct mode toggle."""
-        layout: QHBoxLayout = QHBoxLayout()
-        layout.addWidget(QLabel("WWM"))
-        layout.addWidget(self.__mode_toggle, stretch=1)
-        layout.addWidget(QLabel("Audio"))
-        return layout
-
-    def __construct_helpers(self) -> QWidget:
-        """Construct helper widgets."""
-        widget: QWidget = QWidget()
-        layout: QHBoxLayout = QHBoxLayout(widget)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.addLayout(self.__construct_volume_slider())
-        layout.addLayout(self.__construct_mode_toggle())
-        return widget
+        self.__menu_bar.setStyleSheet(f"""
+            QMenuBar {{
+                background-color: {Colors.BACKGROUND.value.hex};
+                color: {Colors.WHITE.value.hex};
+                padding: 2px 4px;
+                border: none;
+            }}
+            QMenuBar::item {{
+                background: transparent;
+                padding: 4px 10px;
+                border-radius: {RADIUS_SM}px;
+            }}
+            QMenuBar::item:selected {{ background-color: {Colors.BACKGROUND_2.value.hex}; }}
+            QMenuBar::item:pressed {{ background-color: {Colors.ACCENT_1.value.hex}; }}
+            QMenu {{
+                background-color: {Colors.BACKGROUND_1.value.hex};
+                color: {Colors.WHITE.value.hex};
+                border: 1px solid {Colors.BACKGROUND_2.value.hex};
+                border-radius: {RADIUS_SM}px;
+                padding: 4px;
+            }}
+            QMenu::item {{ padding: 6px 24px 6px 12px; border-radius: {RADIUS_SM}px; }}
+            QMenu::item:selected {{ background-color: {Colors.ACCENT_1.value.hex}; }}
+            QMenu::separator {{
+                height: 1px;
+                background-color: {Colors.BACKGROUND_2.value.hex};
+                margin: 4px 8px;
+            }}
+        """)
 
     def __construct_songs_section(self) -> Viewer:
         """Construct Songs section."""
@@ -601,56 +559,6 @@ class Player(QMainWindow):
         layout.addWidget(self.__construct_songs_section(), stretch=1)
         return layout
 
-    def __construct_header(self) -> QWidget:
-        """Construct now-playing header."""
-        widget: QWidget = QWidget()
-        layout: QVBoxLayout = QVBoxLayout(widget)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        layout.addWidget(self.__title_label)
-        layout.addWidget(self.__artist_label)
-        return widget
-
-    def __construct_track(self) -> QHBoxLayout:
-        """Construct track section."""
-        layout: QHBoxLayout = QHBoxLayout()
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(10)
-        layout.addWidget(self.__construct_header(), stretch=0)
-        layout.addWidget(self.__progressbar, stretch=1)
-        layout.addWidget(self.__current_time, stretch=0)
-        layout.addWidget(QLabel("/"), stretch=0)
-        layout.addWidget(self.__duration_time, stretch=0)
-        return layout
-
-    def __construct_controls(self) -> QGridLayout:
-        """Construct player controls."""
-        grid: QGridLayout = QGridLayout()
-        widget: QWidget = QWidget()
-        layout: QHBoxLayout = QHBoxLayout(widget)
-        layout.setContentsMargins(0, 0, 0, 0)
-        self.__shuffle_button = ShuffleButton()
-        self.__repeat_button = RepeatButton()
-        self.__play = PlayButton()
-        layout.addWidget(self.__shuffle_button, alignment=Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.__construct_button(PreviousButton(), self.__previous_on_click,
-                                                  "Previous (F9)"),
-                         alignment=Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.__construct_button(self.__play, self.__play_on_click, "Play (F10)"),
-                         alignment=Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.__construct_button(NextButton(), self.__next_on_click, "Next (F11)"),
-                         alignment=Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.__repeat_button, alignment=Qt.AlignmentFlag.AlignCenter)
-        self.__shuffle_button.toggled.connect(self.__set_shuffle)
-        self.__repeat_button.toggled.connect(self.__set_repeat)
-        grid.addWidget(widget, 0, 1, alignment=Qt.AlignmentFlag.AlignCenter)
-        grid.addWidget(self.__construct_helpers(), 0, 2, alignment=Qt.AlignmentFlag.AlignRight)
-        columns_count: int = grid.columnCount()
-        column_width: int = self.width() // columns_count
-        for column in range(columns_count):
-            grid.setColumnMinimumWidth(column, column_width)
-        return grid
-
     def __construct_layout(self) -> None:
         """Construct layout."""
         root: QWidget = QWidget()
@@ -667,9 +575,9 @@ class Player(QMainWindow):
         self.__central_layout.setContentsMargins(SPACING_MD, SPACING_MD, SPACING_MD, SPACING_MD)
         self.__central_layout.setSpacing(SPACING_MD)
         self.__central_layout.addLayout(self.__construct_playlist())
-        self.__central_layout.addLayout(self.__construct_track())
-        self.__central_layout.addLayout(self.__construct_controls())
         root_layout.addWidget(content, stretch=1)
+        self.__now_playing_bar = NowPlayingBar()
+        root_layout.addWidget(self.__now_playing_bar)
 
     def __cursor_for_edges(self, edges: Qt.Edge) -> Qt.CursorShape:
         """Map a resize-edge combination to the appropriate resize cursor shape."""
@@ -686,6 +594,11 @@ class Player(QMainWindow):
     @override
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         """Update cursor shape and pending resize edges based on proximity to window edges."""
+        if self.isMaximized():
+            self.__resize_edges = Qt.Edge(0)
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+            super().mouseMoveEvent(event)
+            return
         pos: QPoint = event.position().toPoint()
         self.__resize_edges = compute_resize_edges((pos.x(), pos.y()),
                                                     (self.width(), self.height()), RESIZE_MARGIN)
@@ -701,6 +614,13 @@ class Player(QMainWindow):
                 handle.startSystemResize(self.__resize_edges)
                 return
         super().mousePressEvent(event)
+
+    @override
+    def changeEvent(self, event: QEvent) -> None:
+        """Sync the title bar's maximize button with the actual window state."""
+        if event.type() == QEvent.Type.WindowStateChange:
+            self.__title_bar.set_maximized(self.isMaximized())
+        super().changeEvent(event)
 
     @override
     def closeEvent(self, event: QCloseEvent, /) -> None:

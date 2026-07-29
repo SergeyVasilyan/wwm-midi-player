@@ -9,7 +9,7 @@ from PySide6.QtWidgets import QLineEdit, QWidget
 from utils.common import SPACING_MD, Colors
 
 ICON_SIZE = 14
-HANDLE_ANGLE_DEG = 45.0
+HANDLE_ANGLE_DEG = -45.0
 HANDLE_LENGTH_RATIO = 0.32
 
 

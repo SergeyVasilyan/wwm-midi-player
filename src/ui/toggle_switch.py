@@ -30,7 +30,7 @@ class ToggleSwitch(QAbstractButton):
         self.setCheckable(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.__checked_color: QColor = Colors.ACCENT_1.value.qcolor
-        self.__unchecked_color: QColor = Colors.ACCENT_2.value.qcolor
+        self.__unchecked_color: QColor = Colors.BACKGROUND_2.value.qcolor
         self.__knob_color: QColor = QColor("#FFFFFF")
         self.__width: int = 45
         self.__height: int = int(self.__width * .52)

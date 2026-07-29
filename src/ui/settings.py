@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ui.dialog_style import apply_dialog_theme
 from ui.key_configurator import KeyConfigurator
 
 
@@ -22,6 +23,7 @@ class SettingsDialog(QDialog):
             self.setWindowIcon(parent.windowIcon())
         self.setWindowTitle("Settings")
         self.setModal(True)
+        apply_dialog_theme(self)
         self.__create_layout()
 
     def __open_key_configurator_on_click(self) -> None:

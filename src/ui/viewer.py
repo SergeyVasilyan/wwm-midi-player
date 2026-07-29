@@ -14,9 +14,9 @@ class Viewer(QFrame):
         """Initialize Viewer."""
         super().__init__(parent=parent)
         self.__widget: QListWidget = QListWidget(self)
-        self.__widget.setItemDelegate(SongDelegate(self.__widget, self.__widget))
+        self.__delegate: SongDelegate = SongDelegate(self.__widget, accent, self.__widget)
+        self.__widget.setItemDelegate(self.__delegate)
         self.__radius: int = RADIUS_MD
-        self.__accent: Colors = accent
         layout: QVBoxLayout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.__widget)
@@ -27,6 +27,10 @@ class Viewer(QFrame):
         """Return widget."""
         return self.__widget
 
+    def set_now_playing_row(self, row: int) -> None:
+        """Mark row as the now-playing track (or -1 for none)."""
+        self.__delegate.set_now_playing_row(row)
+
     def set_style(self) -> None:
         """Override size hint."""
         self.setStyleSheet(f"""
@@ -36,23 +40,12 @@ class Viewer(QFrame):
                 border: 1px solid {Colors.BACKGROUND.value.hex};
             }}
         """)
-        self.__widget.setStyleSheet(f"""
-            QListWidget {{
+        self.__widget.setStyleSheet("""
+            QListWidget {
                 background-color: transparent;
                 border: none;
-                font-size: 14px;
                 outline: 0;
-            }}
-            QListWidget::item {{
-                background-color: transparent;
-                border-bottom: 1px solid {Colors.BACKGROUND_2.value.hex};
-                border-radius: {self.__radius}px;
-                padding: 6px;
-            }}
-            QListWidget::item:selected {{
-                background-color: transparent;
-                border-left: 3px solid {self.__accent.value.hex};
-            }}
+            }
         """)
 
 if __name__ == "__main__":

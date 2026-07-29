@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from ui.buttons.key import KeyButton
+from ui.dialog_style import apply_dialog_theme
 from ui.key_catcher import KeyCatcher
 from utils.common import Colors
 from utils.wwm_macro import KeyManager
@@ -28,6 +29,7 @@ class KeyConfigurator(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Key Configurator")
         self.setModal(True)
+        apply_dialog_theme(self)
         self.__manager: KeyManager = KeyManager()
         self.__buttons: list[KeyButton] = []
         self.__create_layout()
@@ -93,7 +95,8 @@ class KeyConfigurator(QDialog):
         layout: QGridLayout = QGridLayout()
         row: int = 0
         header: QLabel = QLabel("Customize which keys play each note. Click a key to change it.")
-        header.setStyleSheet("font-size: 14pt; font-weight: bold; padding-bottom: 8px;")
+        header.setStyleSheet(
+            "font-size: 14pt; font-weight: bold; padding-bottom: 8px; background: transparent;")
         layout.addWidget(header, row, 0, 1, -1, alignment=Qt.AlignmentFlag.AlignCenter)
         row += 1
         row = self.__construct_key_binding_section(layout, row)
