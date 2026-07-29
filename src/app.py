@@ -1,7 +1,6 @@
 """Simple PySide6 MIDI player."""
 
 import contextlib
-import re
 import sys
 import time
 from collections.abc import Callable
@@ -13,14 +12,14 @@ import mido
 import tinysoundfont
 import win32gui
 from PySide6.QtCore import QRect, QSize, QThread, QTimer, Signal, Slot
-from PySide6.QtGui import QAction, QCloseEvent, QGuiApplication, QIcon, Qt
+from PySide6.QtGui import QAction, QCloseEvent, QColor, QFont, QGuiApplication, QIcon, Qt
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
     QGridLayout,
     QHBoxLayout,
     QLabel,
-    QListWidget,
+    QLineEdit,
     QListWidgetItem,
     QMainWindow,
     QMenu,
@@ -34,15 +33,19 @@ from PySide6.QtWidgets import (
 from ui.buttons.next import NextButton
 from ui.buttons.play import PlayButton
 from ui.buttons.previous import PreviousButton
+from ui.buttons.repeat import RepeatButton
+from ui.buttons.shuffle import ShuffleButton
 from ui.progressbar import ProgressBar
 from ui.settings import SettingsDialog
 from ui.special import SpecialDialog
+from ui.toast import Toast
 from ui.toggle_switch import ToggleSwitch
 from ui.viewer import Viewer
 from ui.volume_slider import Volume
 from utils.common import Colors, resource_path
 from utils.midi_timing import calculate_duration
 from utils.playlist import next_track_index
+from utils.track_info import TrackInfo, parse_track_info
 from utils.wwm_macro import KeyManager
 
 
@@ -188,9 +191,14 @@ class Player(QMainWindow):
         self.__thread: Worker|None = None
         self.__repeat: bool = False
         self.__shuffle: bool = False
+        self.__now_playing_item: QListWidgetItem|None = None
+        self.__toast: Toast|None = None
         self.__soundfont: Path = resource_path("GeneralUser.sf2")
-        self.__file: QLabel = QLabel("No files loaded")
-        self.__file.setStyleSheet("font-weight: bold;")
+        self.__title_label: QLabel = QLabel("No files loaded")
+        self.__title_label.setStyleSheet("font-weight: bold; font-size: 16px;")
+        self.__artist_label: QLabel = QLabel("")
+        self.__artist_label.setStyleSheet("color: #999999; font-size: 12px;")
+        self.__artist_label.setVisible(False)
         self.__progressbar: ProgressBar = ProgressBar()
         self.__mode_toggle: ToggleSwitch = ToggleSwitch()
         self.__current_time: QLabel = QLabel("00:00")
@@ -199,18 +207,30 @@ class Player(QMainWindow):
         self.__duration_time.setStyleSheet("font-weight: bold;")
         self.__current: int = 0
         self.__duration: int = 0
-        self.__artists: Viewer
+        self.__search: QLineEdit
         self.__songs: Viewer
         self.__play: PlayButton
+        self.__repeat_button: RepeatButton
+        self.__shuffle_button: ShuffleButton
+        self.__repeat_action: QAction
+        self.__shuffle_action: QAction
+        self.__central_layout: QVBoxLayout
         self.__progress_timer: QTimer
         self.__construct_menu_bar()
         self.__construct_layout()
+        self.__wire_repeat_shuffle_sync()
         self.__bind_shortcuts()
 
     @staticmethod
     def __convert_to_mm_ss(seconds: int) -> tuple[int, int]:
         """Convert seconds to humane format MM:SS."""
         return divmod(seconds, 60)
+
+    def __set_header(self, title: str, artist: str="") -> None:
+        """Set the now-playing header text."""
+        self.__title_label.setText(title)
+        self.__artist_label.setText(artist)
+        self.__artist_label.setVisible(bool(artist))
 
     def __bind_shortcuts(self) -> None:
         """Bind shortcuts."""
@@ -246,6 +266,15 @@ class Player(QMainWindow):
             return
         self.__current += 1
 
+    @Slot()
+    def __on_toast_dismissed(self) -> None:
+        """Remove the toast from the layout once it's dismissed."""
+        if self.__toast is None:
+            return
+        self.__central_layout.removeWidget(self.__toast)
+        self.__toast.deleteLater()
+        self.__toast = None
+
     @Slot(str)
     def __show_error(self, msg: str) -> None:
         """Show error message and stop counter."""
@@ -253,7 +282,24 @@ class Player(QMainWindow):
             self.__progress_timer.stop()
         self.__progressbar.setValue(0)
         self.__current_time.setText("00:00")
-        QMessageBox.critical(self, "Error", msg)
+        if self.__toast is not None:
+            self.__on_toast_dismissed()
+        self.__toast = Toast(msg, self)
+        self.__toast.dismissed.connect(self.__on_toast_dismissed)
+        self.__central_layout.insertWidget(0, self.__toast)
+
+    def __mark_now_playing(self, item: QListWidgetItem) -> None:
+        """Mark item as the now-playing track, independent of list selection."""
+        if self.__now_playing_item is not None:
+            self.__now_playing_item.setFont(QFont())
+            self.__now_playing_item.setBackground(Qt.BrushStyle.NoBrush)
+        font: QFont = item.font()
+        font.setBold(True)
+        item.setFont(font)
+        tint: QColor = QColor(Colors.ACCENT_1.value.qcolor)
+        tint.setAlpha(60)
+        item.setBackground(tint)
+        self.__now_playing_item = item
 
     def __start_playback(self) -> None:
         """Start playback."""
@@ -261,7 +307,7 @@ class Player(QMainWindow):
             self.__thread.stop()
             self.__thread.wait()
         self.__play.change.emit(True)
-        self.__songs.widget.setCurrentRow(self.__current_index)
+        self.__mark_now_playing(self.__songs.widget.item(self.__current_index))
         is_audio: bool = self.__mode_toggle.isChecked()
         self.__thread = Worker(self.__files[self.__current_index], self.__soundfont.as_posix(),
                                is_audio)
@@ -270,23 +316,21 @@ class Player(QMainWindow):
         self.__thread.track_ended.connect(self.__on_track_ended)
         self.__thread.finished.connect(lambda: self.__play.change.emit(False))
         self.__thread.start()
-        self.__file.setText(self.__songs.widget.currentItem().text().split(".")[0])
+        info: TrackInfo = parse_track_info(Path(self.__files[self.__current_index]).name)
+        self.__set_header(info.title, info.artist)
 
     def __songs_on_double_click(self, item: QListWidgetItem) -> None:
         """Play track when double-clicked in song."""
         self.__current_index = self.__songs.widget.row(item)
         self.__start_playback()
 
-    def __artists_on_double_click(self, item: QListWidgetItem) -> None:
-        """Filter songs by double-clicked artist."""
-        artist: str = item.text()
-        songs: QListWidget = self.__songs.widget
+    def __on_search_changed(self, text: str) -> None:
+        """Filter songs by search text."""
+        needle: str = text.lower()
+        songs = self.__songs.widget
         for i in range(songs.count()):
-            song_item: QListWidgetItem = songs.item(i)
-            if artist == "ALL" or artist in song_item.text():
-                song_item.setHidden(False)
-            else:
-                song_item.setHidden(True)
+            item: QListWidgetItem = songs.item(i)
+            item.setHidden(needle not in item.text().lower())
 
     def __save_playlist(self) -> None:
         """Save playlist to file."""
@@ -298,21 +342,30 @@ class Player(QMainWindow):
                 f.write(path + "\n")
 
     def __add_songs(self) -> None:
-        """Add songs."""
-        self.__current_index = 0
-        self.__artists.widget.clear()
+        """Rebuild the song list widget from self.__files."""
+        if self.__current_index == -1:
+            self.__current_index = 0
         self.__songs.widget.clear()
-        artists: set[str] = set()
+        self.__now_playing_item = None
         for f in self.__files:
-            file_name: str = Path(f).name
-            self.__songs.widget.addItem(file_name)
-            artist: str = "Unknown"
-            if " - " in file_name:
-                artist = file_name.split(" - ")[0]
-            for group in re.split(r",| feat | ft | feat. | ft. |&", artist):
-                artists.add(group.strip())
-        self.__artists.widget.addItems(["ALL", *sorted(artists)])
-        self.__artists.widget.setCurrentRow(0)
+            self.__songs.widget.addItem(Path(f).name)
+        self.__on_search_changed(self.__search.text())
+
+    def __clear_playlist(self) -> None:
+        """Clear the playlist and reset playback state."""
+        if self.__thread and self.__thread.isRunning():
+            self.__thread.stop()
+            self.__thread.wait()
+        with contextlib.suppress(AttributeError):
+            self.__progress_timer.stop()
+        self.__files.clear()
+        self.__current_index = -1
+        self.__now_playing_item = None
+        self.__songs.widget.clear()
+        self.__progressbar.setValue(0)
+        self.__current_time.setText("00:00")
+        self.__duration_time.setText("00:00")
+        self.__set_header("No files loaded")
 
     def __load_playlist(self) -> None:
         """Load playlist from file."""
@@ -321,18 +374,19 @@ class Player(QMainWindow):
             return
         with Path(filename).open(encoding="utf-8") as f:
             self.__files = [line.strip() for line in f if line.strip()]
+        self.__current_index = -1
         self.__add_songs()
-        self.__file.setText(f"Loaded playlist with {len(self.__files)} files.")
+        self.__set_header(f"Loaded playlist with {len(self.__files)} files.")
 
     def __browse_on_click(self) -> None:
-        """Browse button on click callback."""
+        """Browse button on click callback: adds files to the current playlist."""
         files, _ = QFileDialog.getOpenFileNames(self, "Open MIDI Files", "",
                                                 "MIDI Files (*.mid *.midi)")
         if not files:
             return
-        self.__files = files
+        self.__files.extend(files)
         self.__add_songs()
-        self.__file.setText(f"Loaded {len(files)} files. Ready to play.")
+        self.__set_header(f"Added {len(files)} file(s). Playlist has {len(self.__files)} total.")
 
     def __previous_on_click(self) -> None:
         """Previous button on click callback."""
@@ -343,7 +397,7 @@ class Player(QMainWindow):
     def __play_on_click(self) -> None:
         """Play button on click callback."""
         if self.__current_index == -1 or not self.__files:
-            self.__file.setText("Please load MIDI files first!")
+            self.__set_header("Please load MIDI files first!")
             self.__play.change.emit(False)
             return
         if self.__thread and self.__thread.isRunning():
@@ -397,25 +451,12 @@ class Player(QMainWindow):
         dialog: SpecialDialog = SpecialDialog(self)
         dialog.exec()
 
-    def __construct_button(self, text: str, callback: Callable, key: str="") -> QVBoxLayout:
+    def __construct_button(self, button: QPushButton, callback: Callable,
+                                 tooltip: str) -> QPushButton:
         """Construct button."""
-        layout: QVBoxLayout = QVBoxLayout()
-        layout.setContentsMargins(0, 0, 0, 0)
-        button: QPushButton
-        if text == "Next":
-            button = NextButton()
-        elif text == "Previous":
-            button = PreviousButton()
-        elif text == "Play":
-            button = PlayButton()
-            self.__play = button
-        else:
-           button = QPushButton(text)
+        button.setToolTip(tooltip)
         button.clicked.connect(callback)
-        layout.addWidget(button, alignment=Qt.AlignmentFlag.AlignCenter)
-        if key:
-            layout.addWidget(QLabel(f"[{key}]"), alignment=Qt.AlignmentFlag.AlignCenter)
-        return layout
+        return button
 
     def __construct_file_menu(self) -> None:
         """Construct file menu."""
@@ -424,14 +465,18 @@ class Player(QMainWindow):
         open_action: QAction = QAction("Open MIDI file", self)
         save_action: QAction = QAction("Save Playlist", self)
         load_action: QAction = QAction("Load Playlist", self)
+        clear_action: QAction = QAction("Clear Playlist", self)
         exit_action: QAction = QAction("Exit", self)
         open_action.triggered.connect(self.__browse_on_click)
         save_action.triggered.connect(self.__save_playlist)
         load_action.triggered.connect(self.__load_playlist)
+        clear_action.triggered.connect(self.__clear_playlist)
         exit_action.triggered.connect(self.close)
         menu.addAction(open_action)
         menu.addAction(save_action)
         menu.addAction(load_action)
+        menu.addAction(clear_action)
+        menu.addSeparator()
         menu.addAction(exit_action)
 
     def __construct_playback_menu(self) -> None:
@@ -441,19 +486,24 @@ class Player(QMainWindow):
         previous_action: QAction = QAction("Previous", parent=self)
         play_action: QAction = QAction("Play/Pause", self)
         next_action: QAction = QAction("Next", self)
-        repeat_action: QAction = QAction("Repeat", self, checkable=True)
-        shuffle_action: QAction = QAction("Shuffle", self, checkable=True)
+        self.__repeat_action = QAction("Repeat", self, checkable=True)
+        self.__shuffle_action = QAction("Shuffle", self, checkable=True)
         previous_action.triggered.connect(self.__previous_on_click)
         play_action.triggered.connect(self.__play_on_click)
         next_action.triggered.connect(self.__next_on_click)
-        repeat_action.toggled.connect(self.__set_repeat)
-        shuffle_action.toggled.connect(self.__set_shuffle)
         menu.addAction(previous_action)
         menu.addAction(play_action)
         menu.addAction(next_action)
         menu.addSeparator()
-        menu.addAction(repeat_action)
-        menu.addAction(shuffle_action)
+        menu.addAction(self.__repeat_action)
+        menu.addAction(self.__shuffle_action)
+
+    def __wire_repeat_shuffle_sync(self) -> None:
+        """Keep the Repeat/Shuffle transport buttons and menu actions in sync."""
+        self.__repeat_action.toggled.connect(self.__repeat_button.setChecked)
+        self.__repeat_button.toggled.connect(self.__repeat_action.setChecked)
+        self.__shuffle_action.toggled.connect(self.__shuffle_button.setChecked)
+        self.__shuffle_button.toggled.connect(self.__shuffle_action.setChecked)
 
     def __construct_setting_menu(self) -> None:
         """Construct settings menu."""
@@ -513,32 +563,43 @@ class Player(QMainWindow):
         layout.addLayout(self.__construct_mode_toggle())
         return widget
 
-    def __construct_artists_section(self) -> Viewer:
-        """Construct Artists section."""
-        self.__artists = Viewer(accent=Colors.ACCENT_2)
-        self.__artists.widget.itemDoubleClicked.connect(self.__artists_on_double_click)
-        return self.__artists
-
     def __construct_songs_section(self) -> Viewer:
         """Construct Songs section."""
         self.__songs = Viewer()
         self.__songs.widget.itemDoubleClicked.connect(self.__songs_on_double_click)
         return self.__songs
 
-    def __construct_playlist(self) -> QHBoxLayout:
-        """Construct track section."""
-        layout: QHBoxLayout = QHBoxLayout()
+    def __construct_search(self) -> QLineEdit:
+        """Construct the song search box."""
+        self.__search = QLineEdit()
+        self.__search.setPlaceholderText("Search songs...")
+        self.__search.textChanged.connect(self.__on_search_changed)
+        return self.__search
+
+    def __construct_playlist(self) -> QVBoxLayout:
+        """Construct playlist section."""
+        layout: QVBoxLayout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self.__construct_artists_section(), stretch=1)
-        layout.addWidget(self.__construct_songs_section(), stretch=3)
+        layout.addWidget(self.__construct_search())
+        layout.addWidget(self.__construct_songs_section(), stretch=1)
         return layout
+
+    def __construct_header(self) -> QWidget:
+        """Construct now-playing header."""
+        widget: QWidget = QWidget()
+        layout: QVBoxLayout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(self.__title_label)
+        layout.addWidget(self.__artist_label)
+        return widget
 
     def __construct_track(self) -> QHBoxLayout:
         """Construct track section."""
         layout: QHBoxLayout = QHBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(10)
-        layout.addWidget(self.__file, stretch=0)
+        layout.addWidget(self.__construct_header(), stretch=0)
         layout.addWidget(self.__progressbar, stretch=1)
         layout.addWidget(self.__current_time, stretch=0)
         layout.addWidget(QLabel("/"), stretch=0)
@@ -551,9 +612,20 @@ class Player(QMainWindow):
         widget: QWidget = QWidget()
         layout: QHBoxLayout = QHBoxLayout(widget)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addLayout(self.__construct_button("Previous", self.__previous_on_click, key="F9"))
-        layout.addLayout(self.__construct_button("Play", self.__play_on_click, key="F10"))
-        layout.addLayout(self.__construct_button("Next", self.__next_on_click, key="F11"))
+        self.__shuffle_button = ShuffleButton()
+        self.__repeat_button = RepeatButton()
+        self.__play = PlayButton()
+        layout.addWidget(self.__shuffle_button, alignment=Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.__construct_button(PreviousButton(), self.__previous_on_click,
+                                                  "Previous (F9)"),
+                         alignment=Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.__construct_button(self.__play, self.__play_on_click, "Play (F10)"),
+                         alignment=Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.__construct_button(NextButton(), self.__next_on_click, "Next (F11)"),
+                         alignment=Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.__repeat_button, alignment=Qt.AlignmentFlag.AlignCenter)
+        self.__shuffle_button.toggled.connect(self.__set_shuffle)
+        self.__repeat_button.toggled.connect(self.__set_repeat)
         grid.addWidget(widget, 0, 1, alignment=Qt.AlignmentFlag.AlignCenter)
         grid.addWidget(self.__construct_helpers(), 0, 2, alignment=Qt.AlignmentFlag.AlignRight)
         columns_count: int = grid.columnCount()
@@ -566,10 +638,10 @@ class Player(QMainWindow):
         """Construct layout."""
         widget: QWidget = QWidget()
         self.setCentralWidget(widget)
-        layout: QVBoxLayout = QVBoxLayout(widget)
-        layout.addLayout(self.__construct_playlist())
-        layout.addLayout(self.__construct_track())
-        layout.addLayout(self.__construct_controls())
+        self.__central_layout = QVBoxLayout(widget)
+        self.__central_layout.addLayout(self.__construct_playlist())
+        self.__central_layout.addLayout(self.__construct_track())
+        self.__central_layout.addLayout(self.__construct_controls())
 
     @override
     def closeEvent(self, event: QCloseEvent, /) -> None:

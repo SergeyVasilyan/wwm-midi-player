@@ -2,11 +2,15 @@
 
 from typing import override
 
-from PySide6.QtCore import QEasingCurve, QPointF, QRectF, Qt, QVariantAnimation, Signal, Slot
-from PySide6.QtGui import QBrush, QPainter, QPaintEvent
+from PySide6.QtCore import QEasingCurve, QPointF, QRectF, QSize, Qt, QVariantAnimation, Signal, Slot
+from PySide6.QtGui import QBrush, QColor, QPainter, QPaintEvent
 from PySide6.QtWidgets import QWidget
 
 from ui.buttons.abstract import AbstractButton
+
+PRIMARY_SIZE = QSize(52, 52)
+PRIMARY_BACKGROUND_ALPHA = 255
+GLYPH_COLOR = QColor("#FFFFFF")
 
 
 class PlayButton(AbstractButton):
@@ -16,7 +20,7 @@ class PlayButton(AbstractButton):
 
     def __init__(self, parent: QWidget|None=None) -> None:
         """Initialize Play/Pause Button widget."""
-        super().__init__(parent=parent)
+        super().__init__(parent=parent, size=PRIMARY_SIZE)
         self.__is_playing: bool = False
         self.__animation: QVariantAnimation = QVariantAnimation(self)
         self.__animation.setDuration(400)
@@ -44,9 +48,13 @@ class PlayButton(AbstractButton):
         """Override paint event."""
         painter: QPainter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        rect: QRectF = self.rect().adjusted(5, 0, -5, 0).toRectF()
-        painter.setBrush(QBrush(self._color))
+        circle: QRectF = self._scaled_rect()
         painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(self._background_color(PRIMARY_BACKGROUND_ALPHA))
+        painter.drawEllipse(circle)
+        rect: QRectF = circle.adjusted(circle.width() * 0.30, circle.height() * 0.26,
+                                       -circle.width() * 0.30, -circle.height() * 0.26)
+        painter.setBrush(QBrush(GLYPH_COLOR))
         self.__morph = 1.0 if self.__is_playing else 0.0
         if self.__animation.state() == self.__animation.State.Running:
             self.__morph = self.__animation.currentValue()
