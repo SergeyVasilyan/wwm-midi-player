@@ -46,7 +46,7 @@ from utils.midi_timing import calculate_duration
 from utils.playlist import next_track_index
 from utils.track_info import TrackInfo, parse_track_info
 from utils.window_geometry import compute_resize_edges
-from utils.wwm_macro import KeyManager, best_octave_shift
+from utils.wwm_macro import KeyManager
 
 
 class Worker(QThread):
@@ -56,18 +56,24 @@ class Worker(QThread):
     error: Signal = Signal(str)
     track_ended: Signal = Signal()
 
-    def __init__(self, filename: str, soundfont: str, is_audio: bool=False) -> None:
-        """Initialize worker."""
+    def __init__(self, filename: str, synth: tinysoundfont.Synth|None,
+                      is_audio: bool=False) -> None:
+        """Initialize worker.
+
+        synth is a shared, already-started, already-soundfont-loaded Synth
+        owned by Player and reused across tracks (required when is_audio);
+        Worker never loads a SoundFont or tears the synth down itself, since
+        reloading a 32MB .sf2 on every track change is the expensive part.
+        """
         super().__init__()
         self.__is_audio: bool = is_audio
         self.__filename: str = filename
-        self.__soundfont: str = soundfont
+        self.__synth: tinysoundfont.Synth|None = synth
         self.__key_manager: KeyManager = KeyManager()
         self.__running: bool = True
         self.__paused: bool = False
         self.__volume: int = 100
         self.__sent_volume: int|None = None
-        self.__wwm_shift: int = 0
 
     @property
     def paused(self) -> bool:
@@ -78,8 +84,8 @@ class Worker(QThread):
         """Calculate overall duration."""
         self.duration_ready.emit(calculate_duration(midi))
 
-    def __add_note(self, synth: tinysoundfont.Synth, msg: mido.Message, chord_notes: list[int],
-                         velocities: list[int]) -> None:
+    def __add_note(self, synth: tinysoundfont.Synth|None, msg: mido.Message,
+                         chord_notes: list[int], velocities: list[int]) -> None:
         """Add note details."""
         if msg.type == "note_on" and msg.velocity > 0:
             chord_notes.append(msg.note)
@@ -87,7 +93,7 @@ class Worker(QThread):
         elif msg.type == "note_off" and self.__is_audio:
             synth.noteoff(0, msg.note)
 
-    def __flush_tick_events(self, handle: int, synth: tinysoundfont.Synth,
+    def __flush_tick_events(self, handle: int, synth: tinysoundfont.Synth|None,
                                   tick_events: list[mido.Message]) -> None:
         """Flush tick events."""
         if not tick_events:
@@ -102,33 +108,12 @@ class Worker(QThread):
                 for n in chord_notes:
                     synth.noteon(0, n, chord_velocity)
             else:
-                shifted_notes: list[int] = [n + self.__wwm_shift for n in chord_notes]
-                self.__key_manager.play_chord(handle, shifted_notes)
+                self.__key_manager.play_chord(handle, chord_notes)
         tick_events.clear()
 
-    def __compute_wwm_shift(self, player: mido.MidiFile) -> int:
-        """Pick the whole-octave transposition that best avoids WWM key-mapping collisions.
-
-        Pre-scans the file's simultaneous note groups (without playing anything)
-        and picks the shift that minimizes distinct notes folding onto the same
-        key - see utils.wwm_macro.best_octave_shift.
-        """
-        chords: list[list[int]] = []
-        tick_notes: list[int] = []
-        for msg in player:
-            if msg.time > 0:
-                if tick_notes:
-                    chords.append(tick_notes)
-                tick_notes = []
-            if msg.type == "note_on" and msg.velocity > 0:
-                tick_notes.append(msg.note)
-        if tick_notes:
-            chords.append(tick_notes)
-        return best_octave_shift(chords)
-
-    def __apply_volume(self, synth: tinysoundfont.Synth) -> None:
+    def __apply_volume(self, synth: tinysoundfont.Synth|None) -> None:
         """Send the current volume to the synth only when it has actually changed."""
-        if self.__volume != self.__sent_volume:
+        if synth is not None and self.__volume != self.__sent_volume:
             synth.control_change(0, 7, self.__volume)
             self.__sent_volume = self.__volume
 
@@ -158,18 +143,14 @@ class Worker(QThread):
         except Exception as exc:  # noqa: BLE001 - surface any parse failure to the UI
             self.error.emit(f"Failed to load MIDI file.\n{exc}")
             return
-        synth: tinysoundfont.Synth = tinysoundfont.Synth()
+        synth: tinysoundfont.Synth|None = self.__synth
         handle: int = 0
-        if self.__is_audio:
-            synth.start()
-            synth.program_select(0, synth.sfload(self.__soundfont), 0, 0)
-        else:
+        if not self.__is_audio:
             handle = win32gui.FindWindow(None, "Where Winds Meet")
             if not handle:
                 self.error.emit("Where Winds Meet is not running.\n"
                                 "Please run the game then try again.")
                 return
-            self.__wwm_shift = self.__compute_wwm_shift(player)
         tick_events: list[mido.Message] = []
         natural_end: bool = True
         try:
@@ -181,9 +162,8 @@ class Worker(QThread):
                     natural_end = False
                     break
                 if self.__paused:
-                    if self.__is_audio:
-                        for i in range(16):
-                            synth.control_change(i, 123, 0)
+                    if self.__is_audio and synth is not None:
+                        synth.control_change(0, 123, 0)
                     pause_start: float = time.perf_counter()
                     while self.__paused and self.__running:
                         time.sleep(0.05)
@@ -197,7 +177,7 @@ class Worker(QThread):
                     self.__wait_until(start_time, current_song_time)
                 if msg.type in ("note_on", "note_off"):
                     tick_events.append(msg)
-                elif msg.type == "control_change" and self.__is_audio:
+                elif msg.type == "control_change" and self.__is_audio and synth is not None:
                     synth.control_change(0, msg.control, msg.value)
                 if self.__is_audio:
                     self.__apply_volume(synth)
@@ -206,7 +186,10 @@ class Worker(QThread):
             natural_end = False
             self.error.emit(f"Playback error.\n{exc}")
         finally:
-            synth.stop()
+            # Silence any lingering notes without tearing down the shared,
+            # already-loaded synth - it's reused by the next track.
+            if self.__is_audio and synth is not None:
+                synth.control_change(0, 123, 0)
         if natural_end:
             self.track_ended.emit()
 
@@ -240,6 +223,7 @@ class Player(QMainWindow):
         self.__shuffle: bool = False
         self.__toast: Toast|None = None
         self.__soundfont: Path = resource_path("GeneralUser.sf2")
+        self.__synth: tinysoundfont.Synth|None = None
         self.__current: int = 0
         self.__duration: int = 0
         self.__search: QLineEdit
@@ -307,6 +291,18 @@ class Player(QMainWindow):
         self.__toast.dismissed.connect(self.__on_toast_dismissed)
         self.__central_layout.insertWidget(0, self.__toast)
 
+    def __get_synth(self) -> tinysoundfont.Synth:
+        """Return the shared audio synth, creating and loading it on first use.
+
+        Reused across every track change instead of rebuilt per track, since
+        loading the 32MB SoundFont is the expensive part and it never changes.
+        """
+        if self.__synth is None:
+            self.__synth = tinysoundfont.Synth()
+            self.__synth.start()
+            self.__synth.program_select(0, self.__synth.sfload(self.__soundfont.as_posix()), 0, 0)
+        return self.__synth
+
     def __start_playback(self) -> None:
         """Start playback."""
         if self.__thread and self.__thread.isRunning():
@@ -315,8 +311,8 @@ class Player(QMainWindow):
         self.__now_playing_bar.play_button.change.emit(True)
         self.__songs.set_now_playing_row(self.__current_index)
         is_audio: bool = self.__now_playing_bar.mode_toggle.isChecked()
-        self.__thread = Worker(self.__files[self.__current_index], self.__soundfont.as_posix(),
-                               is_audio)
+        synth: tinysoundfont.Synth|None = self.__get_synth() if is_audio else None
+        self.__thread = Worker(self.__files[self.__current_index], synth, is_audio)
         self.__thread.duration_ready.connect(self.__duration_ready)
         self.__thread.error.connect(self.__show_error)
         self.__thread.track_ended.connect(self.__on_track_ended)
@@ -676,6 +672,8 @@ class Player(QMainWindow):
         if self.__thread and self.__thread.isRunning():
             self.__thread.stop()
             self.__thread.wait()
+        if self.__synth is not None:
+            self.__synth.stop()
         return super().closeEvent(event)
 
 if __name__ == "__main__":

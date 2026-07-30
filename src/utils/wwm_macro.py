@@ -14,7 +14,6 @@ from utils.common import Singleton, resource_path
 NOTE_MIN: int = 48
 NOTE_MAX: int = 83
 OCTAVE: int = 12
-MAX_SHIFT_OCTAVES: int = 4
 
 
 def fold_note(note: int, note_min: int = NOTE_MIN, note_max: int = NOTE_MAX) -> int:
@@ -30,46 +29,6 @@ def fold_note(note: int, note_min: int = NOTE_MIN, note_max: int = NOTE_MAX) -> 
     while note > note_max:
         note -= OCTAVE
     return note
-
-
-def count_fold_collisions(chords: list[list[int]], shift: int,
-                           note_min: int = NOTE_MIN, note_max: int = NOTE_MAX) -> int:
-    """Count note instances lost when distinct simultaneous notes fold onto the same key.
-
-    A chord is a list of MIDI note numbers sounding at the same time. Two
-    different notes landing on the same folded key after shift is applied
-    means one of them won't be audible as a separate key press; notes that
-    were already identical (a genuine unison) don't count as a loss.
-    """
-    lost: int = 0
-    for notes in chords:
-        if len(notes) < 2:
-            continue
-        by_target: dict[int, set[int]] = {}
-        for n in notes:
-            target: int = fold_note(n + shift, note_min, note_max)
-            by_target.setdefault(target, set()).add(n)
-        lost += sum(len(originals) - 1 for originals in by_target.values()
-                    if len(originals) > 1)
-    return lost
-
-
-def best_octave_shift(chords: list[list[int]], max_octaves: int = MAX_SHIFT_OCTAVES,
-                       note_min: int = NOTE_MIN, note_max: int = NOTE_MAX) -> int:
-    """Return the whole-octave transposition (in semitones) minimizing fold collisions.
-
-    Searches shifts from -max_octaves to +max_octaves octaves and keeps the
-    one with the fewest lost note instances; ties favor the smallest shift
-    magnitude, and 0 (no transposition) wins ties against itself first.
-    """
-    best_shift: int = 0
-    best_lost: int = count_fold_collisions(chords, 0, note_min, note_max)
-    for octaves in range(1, max_octaves + 1):
-        for candidate in (octaves * OCTAVE, -octaves * OCTAVE):
-            lost: int = count_fold_collisions(chords, candidate, note_min, note_max)
-            if lost < best_lost:
-                best_shift, best_lost = candidate, lost
-    return best_shift
 
 
 class KeyManager(metaclass=Singleton):
@@ -130,6 +89,8 @@ class KeyManager(metaclass=Singleton):
             "high": 72,  # C5
         }
         self.__mapping: dict[int, str] = {}
+        self.__scan_code_cache: dict[int, int] = {}
+        self.__vk_scan_cache: dict[str, int] = {}
         self.__cache: Path = resource_path("src/input/keybindings.json")
         self.__load_keybindings()
         self.__build_map()
@@ -197,12 +158,33 @@ class KeyManager(metaclass=Singleton):
         """Fold note into [48, 83] by octaves to reach playable range."""
         return self.__mapping.get(fold_note(note, self._Note.MIN, self._Note.MAX), None)
 
+    def __scan_code(self, vk_code: int) -> int:
+        """Return the hardware scan code for a virtual-key code, caching per code.
+
+        MapVirtualKey is a deterministic Windows API call - the same vk_code
+        always yields the same scan code, so repeating it for every keypress
+        of a long song is pure overhead.
+        """
+        scan_code: int|None = self.__scan_code_cache.get(vk_code)
+        if scan_code is None:
+            scan_code = win32api.MapVirtualKey(vk_code, 0)
+            self.__scan_code_cache[vk_code] = scan_code
+        return scan_code
+
+    def __vk_scan(self, main_char: str) -> int:
+        """Return the virtual-key code for a character, caching per character."""
+        vk: int|None = self.__vk_scan_cache.get(main_char)
+        if vk is None:
+            vk = win32api.VkKeyScan(main_char) & 0xFF
+            self.__vk_scan_cache[main_char] = vk
+        return vk
+
     def __make_lparam(self, key: int, is_down: bool=False) -> int:
         """Construct the complex lParam integer that Windows expects.
 
         This mimics the hardware details of a keypress.
         """
-        scan_code: int = win32api.MapVirtualKey(key, 0)
+        scan_code: int = self.__scan_code(key)
         lparam: int = 1
         lparam |= (scan_code << 16)
         if not is_down:
@@ -226,7 +208,7 @@ class KeyManager(metaclass=Singleton):
             modifier_vk = win32con.VK_SHIFT
         elif "Ctrl" in parts:
             modifier_vk = win32con.VK_CONTROL
-        main_vk: int = win32api.VkKeyScan(main_char) & 0xFF
+        main_vk: int = self.__vk_scan(main_char)
         if modifier_vk:
             lp_mod: int = self.__make_lparam(modifier_vk, True)
             win32api.PostMessage(handle, win32con.WM_KEYDOWN, modifier_vk, lp_mod)
