@@ -48,6 +48,8 @@ from utils.track_info import TrackInfo, parse_track_info
 from utils.window_geometry import compute_resize_edges
 from utils.wwm_macro import KeyManager
 
+DRUM_CHANNEL: int = 9  # GM channel 10 (0-indexed) is reserved for percussion.
+
 
 class Worker(QThread):
     """MIDI player worker."""
@@ -85,36 +87,34 @@ class Worker(QThread):
         self.duration_ready.emit(calculate_duration(midi))
 
     def __add_note(self, synth: tinysoundfont.Synth|None, msg: mido.Message,
-                         chord_notes: list[int], velocities: list[int]) -> None:
+                         chord_notes: list[tuple[int, int, int]]) -> None:
         """Add note details."""
         if msg.type == "note_on" and msg.velocity > 0:
-            chord_notes.append(msg.note)
-            velocities.append(msg.velocity)
+            chord_notes.append((msg.channel, msg.note, msg.velocity))
         elif msg.type == "note_off" and self.__is_audio:
-            synth.noteoff(0, msg.note)
+            synth.noteoff(msg.channel, msg.note)
 
     def __flush_tick_events(self, handle: int, synth: tinysoundfont.Synth|None,
                                   tick_events: list[mido.Message]) -> None:
         """Flush tick events."""
         if not tick_events:
             return
-        chord_notes: list[int] = []
-        velocities: list[int] = []
+        chord_notes: list[tuple[int, int, int]] = []
         for msg in tick_events:
-            self.__add_note(synth, msg, chord_notes, velocities)
+            self.__add_note(synth, msg, chord_notes)
         if chord_notes:
             if self.__is_audio:
-                chord_velocity: int = max(velocities) if velocities else 64
-                for n in chord_notes:
-                    synth.noteon(0, n, chord_velocity)
+                for channel, n, velocity in chord_notes:
+                    synth.noteon(channel, n, velocity)
             else:
-                self.__key_manager.play_chord(handle, chord_notes)
+                self.__key_manager.play_chord(handle, [n for _, n, _ in chord_notes])
         tick_events.clear()
 
     def __apply_volume(self, synth: tinysoundfont.Synth|None) -> None:
         """Send the current volume to the synth only when it has actually changed."""
         if synth is not None and self.__volume != self.__sent_volume:
-            synth.control_change(0, 7, self.__volume)
+            for channel in range(16):
+                synth.control_change(channel, 7, self.__volume)
             self.__sent_volume = self.__volume
 
     def __wait_until(self, start_time: float, target_song_time: float) -> None:
@@ -151,6 +151,10 @@ class Worker(QThread):
                 self.error.emit("Where Winds Meet is not running.\n"
                                 "Please run the game then try again.")
                 return
+        elif synth is not None:
+            # GM channel 10 (0-indexed 9) defaults to a drum kit even when the
+            # file never sends an explicit program_change for it.
+            synth.program_change(DRUM_CHANNEL, 0, is_drums=True)
         tick_events: list[mido.Message] = []
         natural_end: bool = True
         try:
@@ -163,7 +167,8 @@ class Worker(QThread):
                     break
                 if self.__paused:
                     if self.__is_audio and synth is not None:
-                        synth.control_change(0, 123, 0)
+                        for channel in range(16):
+                            synth.control_change(channel, 123, 0)
                     pause_start: float = time.perf_counter()
                     while self.__paused and self.__running:
                         time.sleep(0.05)
@@ -178,7 +183,10 @@ class Worker(QThread):
                 if msg.type in ("note_on", "note_off"):
                     tick_events.append(msg)
                 elif msg.type == "control_change" and self.__is_audio and synth is not None:
-                    synth.control_change(0, msg.control, msg.value)
+                    synth.control_change(msg.channel, msg.control, msg.value)
+                elif msg.type == "program_change" and self.__is_audio and synth is not None:
+                    synth.program_change(msg.channel, msg.program,
+                                          is_drums=msg.channel == DRUM_CHANNEL)
                 if self.__is_audio:
                     self.__apply_volume(synth)
             self.__flush_tick_events(handle, synth, tick_events)
@@ -189,7 +197,8 @@ class Worker(QThread):
             # Silence any lingering notes without tearing down the shared,
             # already-loaded synth - it's reused by the next track.
             if self.__is_audio and synth is not None:
-                synth.control_change(0, 123, 0)
+                for channel in range(16):
+                    synth.control_change(channel, 123, 0)
         if natural_end:
             self.track_ended.emit()
 
@@ -207,6 +216,8 @@ class Worker(QThread):
 
 class Player(QMainWindow):
     """MIDI Player."""
+
+    hotkey_triggered: Signal = Signal(str)
 
     def __init__(self) -> None:
         """Initialize MIDI Player."""
@@ -241,11 +252,32 @@ class Player(QMainWindow):
         self.__bind_shortcuts()
 
     def __bind_shortcuts(self) -> None:
-        """Bind shortcuts."""
-        keyboard.add_hotkey("f9", self.__previous_on_click)
-        keyboard.add_hotkey("f10", self.__now_playing_bar.play_button.click)
-        keyboard.add_hotkey("f11", self.__next_on_click)
-        keyboard.add_hotkey("f8", self.__now_playing_bar.mode_toggle.toggle)
+        """Bind shortcuts.
+
+        keyboard.add_hotkey() callbacks run on the keyboard library's own hook
+        thread, not the Qt GUI thread - calling widget methods directly from
+        there is undefined behavior (occasional hangs/freezes). Route every
+        hotkey through a Qt signal instead: emitting is thread-safe, and Qt
+        auto-queues delivery onto the GUI thread since emitter and receiver
+        threads differ.
+        """
+        self.hotkey_triggered.connect(self.__on_hotkey)
+        keyboard.add_hotkey("f9", lambda: self.hotkey_triggered.emit("previous"))
+        keyboard.add_hotkey("f10", lambda: self.hotkey_triggered.emit("play"))
+        keyboard.add_hotkey("f11", lambda: self.hotkey_triggered.emit("next"))
+        keyboard.add_hotkey("f8", lambda: self.hotkey_triggered.emit("mode"))
+
+    @Slot(str)
+    def __on_hotkey(self, name: str) -> None:
+        """Dispatch a global hotkey on the GUI thread."""
+        if name == "previous":
+            self.__previous_on_click()
+        elif name == "play":
+            self.__now_playing_bar.play_button.click()
+        elif name == "next":
+            self.__next_on_click()
+        elif name == "mode":
+            self.__now_playing_bar.mode_toggle.toggle()
 
     @Slot(float)
     def __duration_ready(self, duration: float) -> None:
