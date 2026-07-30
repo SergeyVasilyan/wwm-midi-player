@@ -159,17 +159,24 @@ class NowPlayingBar(QFrame):
         layout.addLayout(self.__construct_progress_row())
         return layout
 
+    @staticmethod
+    def __make_caption_label(text: str) -> QLabel:
+        """Construct a small caption label with readable contrast on the dark panel."""
+        label: QLabel = QLabel(text)
+        label.setStyleSheet(f"color: {Colors.WHITE.value.hex}; background: transparent;")
+        return label
+
     def __construct_right_column(self) -> QVBoxLayout:
         """Construct the volume + mode-toggle column."""
         layout: QVBoxLayout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
         volume_row: QHBoxLayout = QHBoxLayout()
-        volume_row.addWidget(QLabel("Volume"))
+        volume_row.addWidget(self.__make_caption_label("Volume"))
         volume_row.addWidget(self.__volume)
         mode_row: QHBoxLayout = QHBoxLayout()
-        mode_row.addWidget(QLabel("WWM"))
+        mode_row.addWidget(self.__make_caption_label("WWM"))
         mode_row.addWidget(self.__mode_toggle, stretch=1)
-        mode_row.addWidget(QLabel("Audio"))
+        mode_row.addWidget(self.__make_caption_label("Audio"))
         layout.addLayout(volume_row)
         layout.addLayout(mode_row)
         return layout

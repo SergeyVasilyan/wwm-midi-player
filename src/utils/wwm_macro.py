@@ -11,6 +11,66 @@ from PySide6.QtCore import Slot
 
 from utils.common import Singleton, resource_path
 
+NOTE_MIN: int = 48
+NOTE_MAX: int = 83
+OCTAVE: int = 12
+MAX_SHIFT_OCTAVES: int = 4
+
+
+def fold_note(note: int, note_min: int = NOTE_MIN, note_max: int = NOTE_MAX) -> int:
+    """Fold a MIDI note into [note_min, note_max] by shifting whole octaves.
+
+    Notes below the range always land on the range's lowest octave and notes
+    above it always land on the highest octave, so pitch class (the note
+    "name") is always preserved exactly - only octave information for notes
+    more than one octave outside the range can be lost.
+    """
+    while note < note_min:
+        note += OCTAVE
+    while note > note_max:
+        note -= OCTAVE
+    return note
+
+
+def count_fold_collisions(chords: list[list[int]], shift: int,
+                           note_min: int = NOTE_MIN, note_max: int = NOTE_MAX) -> int:
+    """Count note instances lost when distinct simultaneous notes fold onto the same key.
+
+    A chord is a list of MIDI note numbers sounding at the same time. Two
+    different notes landing on the same folded key after shift is applied
+    means one of them won't be audible as a separate key press; notes that
+    were already identical (a genuine unison) don't count as a loss.
+    """
+    lost: int = 0
+    for notes in chords:
+        if len(notes) < 2:
+            continue
+        by_target: dict[int, set[int]] = {}
+        for n in notes:
+            target: int = fold_note(n + shift, note_min, note_max)
+            by_target.setdefault(target, set()).add(n)
+        lost += sum(len(originals) - 1 for originals in by_target.values()
+                    if len(originals) > 1)
+    return lost
+
+
+def best_octave_shift(chords: list[list[int]], max_octaves: int = MAX_SHIFT_OCTAVES,
+                       note_min: int = NOTE_MIN, note_max: int = NOTE_MAX) -> int:
+    """Return the whole-octave transposition (in semitones) minimizing fold collisions.
+
+    Searches shifts from -max_octaves to +max_octaves octaves and keeps the
+    one with the fewest lost note instances; ties favor the smallest shift
+    magnitude, and 0 (no transposition) wins ties against itself first.
+    """
+    best_shift: int = 0
+    best_lost: int = count_fold_collisions(chords, 0, note_min, note_max)
+    for octaves in range(1, max_octaves + 1):
+        for candidate in (octaves * OCTAVE, -octaves * OCTAVE):
+            lost: int = count_fold_collisions(chords, candidate, note_min, note_max)
+            if lost < best_lost:
+                best_shift, best_lost = candidate, lost
+    return best_shift
+
 
 class KeyManager(metaclass=Singleton):
     """WWM Key binding manager."""
@@ -18,9 +78,9 @@ class KeyManager(metaclass=Singleton):
     class _Note(IntEnum):
         """Note information enumeration."""
 
-        MIN = 48
-        MAX = 83
-        OFFSET = 12
+        MIN = NOTE_MIN
+        MAX = NOTE_MAX
+        OFFSET = OCTAVE
         SEMITONE_OFFSET = 0
 
     def __init__(self) -> None:
@@ -135,11 +195,7 @@ class KeyManager(metaclass=Singleton):
 
     def __get_note(self, note: int) -> str|None:
         """Fold note into [48, 83] by octaves to reach playable range."""
-        while note < self._Note.MIN:
-            note += self._Note.OFFSET
-        while note > self._Note.MAX:
-            note -= self._Note.OFFSET
-        return self.__mapping.get(note, None)
+        return self.__mapping.get(fold_note(note, self._Note.MIN, self._Note.MAX), None)
 
     def __make_lparam(self, key: int, is_down: bool=False) -> int:
         """Construct the complex lParam integer that Windows expects.

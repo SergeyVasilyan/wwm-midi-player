@@ -46,7 +46,7 @@ from utils.midi_timing import calculate_duration
 from utils.playlist import next_track_index
 from utils.track_info import TrackInfo, parse_track_info
 from utils.window_geometry import compute_resize_edges
-from utils.wwm_macro import KeyManager
+from utils.wwm_macro import KeyManager, best_octave_shift
 
 
 class Worker(QThread):
@@ -66,6 +66,8 @@ class Worker(QThread):
         self.__running: bool = True
         self.__paused: bool = False
         self.__volume: int = 100
+        self.__sent_volume: int|None = None
+        self.__wwm_shift: int = 0
 
     @property
     def paused(self) -> bool:
@@ -99,10 +101,51 @@ class Worker(QThread):
                 chord_velocity: int = max(velocities) if velocities else 64
                 for n in chord_notes:
                     synth.noteon(0, n, chord_velocity)
-                synth.control_change(0, 7, self.__volume)
             else:
-                self.__key_manager.play_chord(handle, chord_notes)
+                shifted_notes: list[int] = [n + self.__wwm_shift for n in chord_notes]
+                self.__key_manager.play_chord(handle, shifted_notes)
         tick_events.clear()
+
+    def __compute_wwm_shift(self, player: mido.MidiFile) -> int:
+        """Pick the whole-octave transposition that best avoids WWM key-mapping collisions.
+
+        Pre-scans the file's simultaneous note groups (without playing anything)
+        and picks the shift that minimizes distinct notes folding onto the same
+        key - see utils.wwm_macro.best_octave_shift.
+        """
+        chords: list[list[int]] = []
+        tick_notes: list[int] = []
+        for msg in player:
+            if msg.time > 0:
+                if tick_notes:
+                    chords.append(tick_notes)
+                tick_notes = []
+            if msg.type == "note_on" and msg.velocity > 0:
+                tick_notes.append(msg.note)
+        if tick_notes:
+            chords.append(tick_notes)
+        return best_octave_shift(chords)
+
+    def __apply_volume(self, synth: tinysoundfont.Synth) -> None:
+        """Send the current volume to the synth only when it has actually changed."""
+        if self.__volume != self.__sent_volume:
+            synth.control_change(0, 7, self.__volume)
+            self.__sent_volume = self.__volume
+
+    def __wait_until(self, start_time: float, target_song_time: float) -> None:
+        """Sleep until target_song_time has elapsed since start_time.
+
+        Sleeps in one coarse chunk down to a small margin, then finishes with
+        short 1ms sleeps for accurate timing, instead of spin-sleeping in 1ms
+        steps for the entire wait (which wastes CPU on long rests and is
+        finer-grained than the OS timer can honor anyway).
+        """
+        fine_margin: float = 0.005
+        while self.__running:
+            remaining: float = target_song_time - (time.perf_counter() - start_time)
+            if remaining <= 0:
+                return
+            time.sleep(remaining - fine_margin if remaining > fine_margin else 0.001)
 
     @override
     def run(self) -> None:
@@ -126,6 +169,7 @@ class Worker(QThread):
                 self.error.emit("Where Winds Meet is not running.\n"
                                 "Please run the game then try again.")
                 return
+            self.__wwm_shift = self.__compute_wwm_shift(player)
         tick_events: list[mido.Message] = []
         natural_end: bool = True
         try:
@@ -144,19 +188,19 @@ class Worker(QThread):
                     while self.__paused and self.__running:
                         time.sleep(0.05)
                     start_time += (time.perf_counter() - pause_start)
-                current_song_time += msg.time
-                while self.__running:
-                    elapsed: float = (time.perf_counter() - start_time)
-                    if elapsed >= current_song_time:
-                        break
-                    time.sleep(min(0.001, current_song_time - elapsed))
-                if msg.type in ("note_on", "note_off"):
-                    tick_events = [msg]
+                if msg.time > 0:
+                    # All messages accumulated so far share the tick that has
+                    # already elapsed - flush them as one chord before waiting
+                    # for the next tick.
                     self.__flush_tick_events(handle, synth, tick_events)
+                    current_song_time += msg.time
+                    self.__wait_until(start_time, current_song_time)
+                if msg.type in ("note_on", "note_off"):
+                    tick_events.append(msg)
                 elif msg.type == "control_change" and self.__is_audio:
                     synth.control_change(0, msg.control, msg.value)
                 if self.__is_audio:
-                    synth.control_change(0, 7, self.__volume)
+                    self.__apply_volume(synth)
             self.__flush_tick_events(handle, synth, tick_events)
         except Exception as exc:  # noqa: BLE001 - surface any playback failure to the UI
             natural_end = False
@@ -291,9 +335,13 @@ class Player(QMainWindow):
         """Filter songs by search text."""
         needle: str = text.lower()
         songs = self.__songs.widget
-        for i in range(songs.count()):
-            item: QListWidgetItem = songs.item(i)
-            item.setHidden(needle not in item.text().lower())
+        songs.setUpdatesEnabled(False)
+        try:
+            for i in range(songs.count()):
+                item: QListWidgetItem = songs.item(i)
+                item.setHidden(needle not in item.text().lower())
+        finally:
+            songs.setUpdatesEnabled(True)
 
     def __save_playlist(self) -> None:
         """Save playlist to file."""

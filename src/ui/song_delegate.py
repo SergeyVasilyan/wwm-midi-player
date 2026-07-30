@@ -42,6 +42,8 @@ class SongDelegate(QStyledItemDelegate):
         self.__title_font.setPixelSize(14)
         self.__artist_font: QFont = QFont()
         self.__artist_font.setPixelSize(12)
+        self.__title_metrics: QFontMetrics = QFontMetrics(self.__title_font)
+        self.__artist_metrics: QFontMetrics = QFontMetrics(self.__artist_font)
         self.__hovered_row: int = -1
         self.__pressed_row: int = -1
         self.__now_playing_row: int = -1
@@ -88,8 +90,8 @@ class SongDelegate(QStyledItemDelegate):
     @override
     def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex) -> QSize:
         """Return a row height that fits both the title and artist lines."""
-        title_height: int = QFontMetrics(self.__title_font).height()
-        artist_height: int = QFontMetrics(self.__artist_font).height()
+        title_height: int = self.__title_metrics.height()
+        artist_height: int = self.__artist_metrics.height()
         block_height: float = title_height + LINE_GAP + artist_height
         row_height: float = block_height + 2 * ROW_INNER_VPADDING + 2 * ROW_V_MARGIN
         base: QSize = super().sizeHint(option, index)
@@ -145,16 +147,15 @@ class SongDelegate(QStyledItemDelegate):
             glyph_center_x: float = (background_rect.left() + SELECTION_GUTTER_WIDTH
                                      + PLAY_GUTTER_WIDTH / 2)
             self.__draw_now_playing_glyph(painter, glyph_center_x, background_rect.center().y())
-        title_metrics: QFontMetrics = QFontMetrics(self.__title_font)
-        artist_metrics: QFontMetrics = QFontMetrics(self.__artist_font)
-        title_text: str = title_metrics.elidedText(
+        title_text: str = self.__title_metrics.elidedText(
             str(index.data(TITLE_ROLE) or ""), Qt.TextElideMode.ElideRight, int(text_width))
-        artist_text: str = artist_metrics.elidedText(
+        artist_text: str = self.__artist_metrics.elidedText(
             str(index.data(ARTIST_ROLE) or ""), Qt.TextElideMode.ElideRight, int(text_width))
         title_top: float = background_rect.top() + ROW_INNER_VPADDING
-        title_rect: QRectF = QRectF(text_x, title_top, text_width, title_metrics.height())
-        artist_rect: QRectF = QRectF(text_x, title_top + title_metrics.height() + LINE_GAP,
-                                     text_width, artist_metrics.height())
+        title_rect: QRectF = QRectF(text_x, title_top, text_width, self.__title_metrics.height())
+        artist_rect: QRectF = QRectF(
+            text_x, title_top + self.__title_metrics.height() + LINE_GAP,
+            text_width, self.__artist_metrics.height())
         painter.setFont(self.__title_font)
         painter.setPen(self.__accent_color if is_now_playing else Colors.WHITE.value.qcolor)
         painter.drawText(title_rect, int(Qt.AlignmentFlag.AlignVCenter), title_text)
