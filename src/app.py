@@ -22,6 +22,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
+    QHBoxLayout,
     QLineEdit,
     QListWidgetItem,
     QMainWindow,
@@ -41,14 +42,14 @@ from ui.special import SpecialDialog
 from ui.titlebar import TitleBar
 from ui.toast import Toast
 from ui.viewer import Viewer
+from ui.visualizer import PianoVisualizer
 from utils.common import RADIUS_SM, RESIZE_MARGIN, SPACING_MD, Colors, resource_path
 from utils.midi_timing import calculate_duration
+from utils.note_events import DRUM_CHANNEL, NoteEvent, build_note_events
 from utils.playlist import next_track_index
 from utils.track_info import TrackInfo, parse_track_info
 from utils.window_geometry import compute_resize_edges
 from utils.wwm_macro import KeyManager
-
-DRUM_CHANNEL: int = 9  # GM channel 10 (0-indexed) is reserved for percussion.
 
 
 class Worker(QThread):
@@ -57,15 +58,21 @@ class Worker(QThread):
     duration_ready: Signal = Signal(float)
     error: Signal = Signal(str)
     track_ended: Signal = Signal()
+    notes_ready: Signal = Signal(list)
 
     def __init__(self, filename: str, synth: tinysoundfont.Synth|None,
-                      is_audio: bool=False) -> None:
+                      is_audio: bool=False, start_offset: float=0.0) -> None:
         """Initialize worker.
 
         synth is a shared, already-started, already-soundfont-loaded Synth
         owned by Player and reused across tracks (required when is_audio);
         Worker never loads a SoundFont or tears the synth down itself, since
         reloading a 32MB .sf2 on every track change is the expensive part.
+
+        start_offset seeks to that many seconds into the song: run() fast-
+        forwards through messages up to that point (still applying
+        program/control changes so instrument state is correct) without
+        actually sounding notes or sleeping, then resumes normal playback.
         """
         super().__init__()
         self.__is_audio: bool = is_audio
@@ -76,11 +83,27 @@ class Worker(QThread):
         self.__paused: bool = False
         self.__volume: int = 100
         self.__sent_volume: int|None = None
+        self.__start_time: float = 0.0
+        self.__last_song_time: float = start_offset
+        self.__start_offset: float = start_offset
 
     @property
     def paused(self) -> bool:
         """Return pause state."""
         return self.__paused
+
+    def elapsed_seconds(self) -> float:
+        """Return seconds elapsed in the current song, frozen while paused.
+
+        Safe to call from the GUI thread while the worker thread runs: mirrors
+        the same perf_counter()-minus-start_time math run() uses internally to
+        drive its own wait loop, reading the same instance attributes run()
+        maintains (float reads/writes are atomic under the GIL, matching the
+        existing lock-free precedent for __paused/__running in this class).
+        """
+        if self.__paused:
+            return self.__last_song_time
+        return time.perf_counter() - self.__start_time
 
     def __calculate_duration(self, midi: mido.MidiFile) -> None:
         """Calculate overall duration."""
@@ -95,9 +118,17 @@ class Worker(QThread):
             synth.noteoff(msg.channel, msg.note)
 
     def __flush_tick_events(self, handle: int, synth: tinysoundfont.Synth|None,
-                                  tick_events: list[mido.Message]) -> None:
-        """Flush tick events."""
+                                  tick_events: list[mido.Message], mute: bool=False) -> None:
+        """Flush tick events.
+
+        mute discards the batch without sounding anything - used while fast-
+        forwarding through a seek, so skipped notes aren't heard/pressed all
+        at once.
+        """
         if not tick_events:
+            return
+        if mute:
+            tick_events.clear()
             return
         chord_notes: list[tuple[int, int, int]] = []
         for msg in tick_events:
@@ -159,27 +190,37 @@ class Worker(QThread):
         natural_end: bool = True
         try:
             self.__calculate_duration(player)
+            self.notes_ready.emit(build_note_events(player))
             current_song_time: float = .0
-            start_time: float = time.perf_counter()
+            skipping: bool = self.__start_offset > 0.0
+            self.__start_time = time.perf_counter()
             for msg in player:
                 if not self.__running:
                     natural_end = False
                     break
                 if self.__paused:
+                    self.__last_song_time = current_song_time
                     if self.__is_audio and synth is not None:
                         for channel in range(16):
                             synth.control_change(channel, 123, 0)
                     pause_start: float = time.perf_counter()
                     while self.__paused and self.__running:
                         time.sleep(0.05)
-                    start_time += (time.perf_counter() - pause_start)
+                    self.__start_time += (time.perf_counter() - pause_start)
                 if msg.time > 0:
                     # All messages accumulated so far share the tick that has
                     # already elapsed - flush them as one chord before waiting
                     # for the next tick.
-                    self.__flush_tick_events(handle, synth, tick_events)
+                    self.__flush_tick_events(handle, synth, tick_events, mute=skipping)
                     current_song_time += msg.time
-                    self.__wait_until(start_time, current_song_time)
+                    if skipping and current_song_time >= self.__start_offset:
+                        # Fast-forward is done: re-anchor the clock so
+                        # __wait_until treats current_song_time as "now"
+                        # instead of trying to catch up instantly.
+                        skipping = False
+                        self.__start_time = time.perf_counter() - current_song_time
+                    if not skipping:
+                        self.__wait_until(self.__start_time, current_song_time)
                 if msg.type in ("note_on", "note_off"):
                     tick_events.append(msg)
                 elif msg.type == "control_change" and self.__is_audio and synth is not None:
@@ -189,7 +230,7 @@ class Worker(QThread):
                                           is_drums=msg.channel == DRUM_CHANNEL)
                 if self.__is_audio:
                     self.__apply_volume(synth)
-            self.__flush_tick_events(handle, synth, tick_events)
+            self.__flush_tick_events(handle, synth, tick_events, mute=skipping)
         except Exception as exc:  # noqa: BLE001 - surface any playback failure to the UI
             natural_end = False
             self.error.emit(f"Playback error.\n{exc}")
@@ -237,6 +278,7 @@ class Player(QMainWindow):
         self.__synth: tinysoundfont.Synth|None = None
         self.__current: int = 0
         self.__duration: int = 0
+        self.__seek_offset: float = 0.0
         self.__search: QLineEdit
         self.__songs: Viewer
         self.__now_playing_bar: NowPlayingBar
@@ -246,6 +288,8 @@ class Player(QMainWindow):
         self.__title_bar: TitleBar
         self.__menu_bar: QMenuBar
         self.__progress_timer: QTimer
+        self.__visualizer: PianoVisualizer
+        self.__visualizer_timer: QTimer
         self.__construct_menu_bar()
         self.__construct_layout()
         self.__wire_now_playing_bar()
@@ -282,7 +326,8 @@ class Player(QMainWindow):
     @Slot(float)
     def __duration_ready(self, duration: float) -> None:
         """Set duration and start timer."""
-        self.__current = 0
+        self.__current = int(self.__seek_offset)
+        self.__seek_offset = 0.0
         self.__duration = int(duration)
         self.__now_playing_bar.set_duration(self.__duration)
         with contextlib.suppress(AttributeError):
@@ -302,6 +347,26 @@ class Player(QMainWindow):
             return
         self.__current += 1
 
+    @Slot(list)
+    def __on_notes_ready(self, events: list[NoteEvent]) -> None:
+        """Load the freshly-parsed note events into the visualizer."""
+        self.__visualizer.load_notes(events, self.__duration)
+        self.__update_visualizer_timer_state()
+
+    @Slot()
+    def __update_visualizer_position(self) -> None:
+        """Push the worker's current playback position into the visualizer."""
+        if self.__thread is not None:
+            self.__visualizer.set_position(self.__thread.elapsed_seconds())
+
+    def __update_visualizer_timer_state(self) -> None:
+        """Run the visualizer's position-poll timer only while a track is active."""
+        should_run: bool = self.__thread is not None and self.__thread.isRunning()
+        if should_run and not self.__visualizer_timer.isActive():
+            self.__visualizer_timer.start(33)
+        elif not should_run and self.__visualizer_timer.isActive():
+            self.__visualizer_timer.stop()
+
     @Slot()
     def __on_toast_dismissed(self) -> None:
         """Remove the toast from the layout once it's dismissed."""
@@ -316,7 +381,10 @@ class Player(QMainWindow):
         """Show error message and stop counter."""
         with contextlib.suppress(AttributeError):
             self.__progress_timer.stop()
+        self.__visualizer.clear()
+        self.__update_visualizer_timer_state()
         self.__now_playing_bar.reset_progress()
+        self.__songs.set_now_playing_row(-1)
         if self.__toast is not None:
             self.__on_toast_dismissed()
         self.__toast = Toast(msg, self)
@@ -335,24 +403,36 @@ class Player(QMainWindow):
             self.__synth.program_select(0, self.__synth.sfload(self.__soundfont.as_posix()), 0, 0)
         return self.__synth
 
-    def __start_playback(self) -> None:
-        """Start playback."""
+    def __start_playback(self, start_offset: float=0.0) -> None:
+        """Start playback, optionally seeking to start_offset seconds into the track."""
         if self.__thread and self.__thread.isRunning():
             self.__thread.stop()
             self.__thread.wait()
+        if self.__toast is not None:
+            # A leftover error from a previous attempt (e.g. WWM mode with the
+            # game not running) would otherwise sit on screen for up to
+            # DISMISS_AFTER_MS even after this new attempt succeeds.
+            self.__on_toast_dismissed()
+        if start_offset <= 0.0:
+            self.__visualizer.clear()
+        self.__seek_offset = start_offset
         self.__now_playing_bar.play_button.change.emit(True)
         self.__songs.set_now_playing_row(self.__current_index)
         is_audio: bool = self.__now_playing_bar.mode_toggle.isChecked()
         synth: tinysoundfont.Synth|None = self.__get_synth() if is_audio else None
-        self.__thread = Worker(self.__files[self.__current_index], synth, is_audio)
+        self.__thread = Worker(self.__files[self.__current_index], synth, is_audio, start_offset)
+        self.__thread.set_volume(self.__now_playing_bar.volume.value())
         self.__thread.duration_ready.connect(self.__duration_ready)
         self.__thread.error.connect(self.__show_error)
         self.__thread.track_ended.connect(self.__on_track_ended)
+        self.__thread.notes_ready.connect(self.__on_notes_ready)
         play_button: PlayButton = self.__now_playing_bar.play_button
         self.__thread.finished.connect(lambda: play_button.change.emit(False))
+        self.__thread.finished.connect(self.__update_visualizer_timer_state)
         self.__thread.start()
         info: TrackInfo = parse_track_info(Path(self.__files[self.__current_index]).name)
         self.__now_playing_bar.set_header(info.title, info.artist)
+        self.__update_visualizer_timer_state()
 
     def __songs_on_double_click(self, item: QListWidgetItem) -> None:
         """Play track when double-clicked in song."""
@@ -402,6 +482,8 @@ class Player(QMainWindow):
             self.__thread.wait()
         with contextlib.suppress(AttributeError):
             self.__progress_timer.stop()
+        self.__visualizer_timer.stop()
+        self.__visualizer.clear()
         self.__files.clear()
         self.__current_index = -1
         self.__songs.set_now_playing_row(-1)
@@ -448,6 +530,13 @@ class Player(QMainWindow):
             self.__thread.toggle_pause()
         else:
             self.__start_playback()
+
+    @Slot(int)
+    def __on_seek_requested(self, seconds: int) -> None:
+        """Restart playback of the current track from the requested position."""
+        if self.__current_index == -1 or not self.__files:
+            return
+        self.__start_playback(start_offset=float(seconds))
 
     def __next_index(self) -> int|None:
         """Return the index to advance to, honoring shuffle/repeat, or None to stop."""
@@ -503,6 +592,7 @@ class Player(QMainWindow):
         bar.shuffle_button.toggled.connect(self.__set_shuffle)
         bar.repeat_button.toggled.connect(self.__set_repeat)
         bar.volume.valueChanged.connect(self.__set_volume)
+        bar.seek_requested.connect(self.__on_seek_requested)
         self.__wire_repeat_shuffle_sync()
 
     def __construct_file_menu(self) -> None:
@@ -635,6 +725,16 @@ class Player(QMainWindow):
         layout.addWidget(self.__construct_songs_section(), stretch=1)
         return layout
 
+    def __construct_content_row(self) -> QHBoxLayout:
+        """Construct the split row: playlist on the left, visualizer on the right."""
+        self.__visualizer = PianoVisualizer()
+        layout: QHBoxLayout = QHBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(SPACING_MD)
+        layout.addLayout(self.__construct_playlist(), stretch=1)
+        layout.addWidget(self.__visualizer, stretch=2)
+        return layout
+
     def __construct_layout(self) -> None:
         """Construct layout."""
         root: QWidget = QWidget()
@@ -650,8 +750,14 @@ class Player(QMainWindow):
         self.__central_layout = QVBoxLayout(content)
         self.__central_layout.setContentsMargins(SPACING_MD, SPACING_MD, SPACING_MD, SPACING_MD)
         self.__central_layout.setSpacing(SPACING_MD)
-        self.__central_layout.addLayout(self.__construct_playlist())
+        self.__central_layout.addLayout(self.__construct_content_row(), stretch=1)
         root_layout.addWidget(content, stretch=1)
+        self.__visualizer_timer = QTimer(self)
+        # PreciseTimer: Qt's default coarse timer can drift/coalesce by tens of
+        # milliseconds on Windows, which reads as visible stutter in the falling
+        # notes at a 33ms tick rate.
+        self.__visualizer_timer.setTimerType(Qt.TimerType.PreciseTimer)
+        self.__visualizer_timer.timeout.connect(self.__update_visualizer_position)
         self.__now_playing_bar = NowPlayingBar()
         root_layout.addWidget(self.__now_playing_bar)
 
@@ -704,6 +810,7 @@ class Player(QMainWindow):
         if self.__thread and self.__thread.isRunning():
             self.__thread.stop()
             self.__thread.wait()
+        self.__visualizer_timer.stop()
         if self.__synth is not None:
             self.__synth.stop()
         return super().closeEvent(event)

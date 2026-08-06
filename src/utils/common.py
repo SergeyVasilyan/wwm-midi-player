@@ -61,6 +61,42 @@ class Colors(Enum):
     BLACK = Color("#000000")
     WHITE = Color("#FFFFFF")
 
+# Falling-note colors for the piano visualizer, one per MIDI channel (0-15).
+# Index 9 (the GM percussion channel) gets a distinct silver/grey so drum hits
+# read as visually different from pitched instruments.
+CHANNEL_COLORS: tuple[str, ...] = (
+    "#4FC3F7", "#81C784", "#FFB74D", "#E57373",
+    "#BA68C8", "#4DB6AC", "#FFD54F", "#7986CB",
+    "#F06292", "#B0BEC5",
+    "#AED581", "#FF8A65", "#9575CD", "#4DD0E1",
+    "#DCE775", "#F48FB1",
+)
+
+
+def channel_color_hex(channel: int) -> str:
+    """Return the hex color for a MIDI channel, wrapping defensively via modulo 16."""
+    return CHANNEL_COLORS[channel % 16]
+
+# Index 9 is reserved exclusively for drum-channel notes (see note_color_hex)
+# so percussion always reads as visually distinct; pitched tracks cycle
+# through the other 15.
+_PITCHED_COLOR_INDICES: tuple[int, ...] = tuple(i for i in range(16) if i != 9)
+
+
+def note_color_hex(track: int, is_drum: bool) -> str:
+    """Return the hex color for a note, keyed by its originating track.
+
+    Colors by track rather than MIDI channel: many real-world files route
+    every instrument through the same channel (commonly channel 0) and
+    differentiate instruments by track instead, so coloring by channel alone
+    would collapse them all into a single color. Drum-channel notes still get
+    the same reserved color regardless of track, so percussion always stands
+    out.
+    """
+    if is_drum:
+        return CHANNEL_COLORS[9]
+    return CHANNEL_COLORS[_PITCHED_COLOR_INDICES[track % len(_PITCHED_COLOR_INDICES)]]
+
 # Shared corner-radius scale, applied consistently across panels/dialogs.
 RADIUS_SM: int = 6
 RADIUS_MD: int = 10

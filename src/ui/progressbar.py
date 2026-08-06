@@ -1,9 +1,17 @@
-"""ProgressBar widget: custom-painted track + hover-reveal thumb (no seek)."""
+"""ProgressBar widget: custom-painted track + hover-reveal thumb, click/drag to seek."""
 
 from typing import override
 
-from PySide6.QtCore import QEasingCurve, QEvent, QPointF, QRectF, Qt
-from PySide6.QtGui import QBrush, QColor, QEnterEvent, QLinearGradient, QPainter, QPaintEvent
+from PySide6.QtCore import QEasingCurve, QEvent, QPointF, QRectF, Qt, Signal
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QEnterEvent,
+    QLinearGradient,
+    QMouseEvent,
+    QPainter,
+    QPaintEvent,
+)
 from PySide6.QtWidgets import QProgressBar, QWidget
 
 from ui.animation import AnimatedProgress
@@ -19,6 +27,8 @@ FILL_ANIMATION_DURATION_MS = 950
 class ProgressBar(QProgressBar):
     """Custom-painted progress bar with a thumb that only appears on hover."""
 
+    seek_requested: Signal = Signal(int)
+
     def __init__(self, parent: QWidget|None=None) -> None:
         """Initialize ProgressBar."""
         super().__init__(parent=parent)
@@ -27,6 +37,7 @@ class ProgressBar(QProgressBar):
         self.setFixedHeight(HIT_AREA_HEIGHT)
         self.setOrientation(Qt.Orientation.Horizontal)
         self.setTextVisible(False)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setStyleSheet("QProgressBar { background: transparent; border: none; }")
         self.__thumb_reveal: AnimatedProgress = AnimatedProgress(
             self, self.__on_reveal_changed, THUMB_HOVER_DURATION_MS)
@@ -65,6 +76,33 @@ class ProgressBar(QProgressBar):
         """Return current progress as a 0..1 fraction, guarding against a zero-range bar."""
         span: int = self.maximum() - self.minimum()
         return 0.0 if span <= 0 else (self.value() - self.minimum()) / span
+
+    def __value_at(self, x: float) -> int:
+        """Return the progress value corresponding to an x coordinate within the bar."""
+        fraction: float = 0.0 if self.width() <= 0 else max(0.0, min(1.0, x / self.width()))
+        return self.minimum() + round(fraction * (self.maximum() - self.minimum()))
+
+    def __seek_to(self, x: float) -> None:
+        """Snap the fill to x and emit seek_requested with the corresponding value."""
+        value: int = self.__value_at(x)
+        self.setValue(value)
+        self.seek_requested.emit(value)
+
+    @override
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        """Seek to the clicked position."""
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.__seek_to(event.position().x())
+            return
+        super().mousePressEvent(event)
+
+    @override
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        """Continue seeking while dragging with the left button held."""
+        if event.buttons() & Qt.MouseButton.LeftButton:
+            self.__seek_to(event.position().x())
+            return
+        super().mouseMoveEvent(event)
 
     @override
     def enterEvent(self, event: QEnterEvent) -> None:

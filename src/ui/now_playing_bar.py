@@ -1,5 +1,6 @@
 """Persistent bottom-docked Now Playing bar: track info, transport, progress, volume."""
 
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from ui.buttons.next import NextButton
@@ -15,6 +16,8 @@ from utils.common import SPACING_MD, SPACING_SM, Colors
 
 class NowPlayingBar(QFrame):
     """Bottom-docked bar: track info (left), transport+progress (center), volume/mode (right)."""
+
+    seek_requested: Signal = Signal(int)
 
     def __init__(self, parent: QWidget|None=None) -> None:
         """Initialize NowPlayingBar."""
@@ -44,6 +47,7 @@ class NowPlayingBar(QFrame):
         self.__mode_toggle: ToggleSwitch = ToggleSwitch()
         self.__volume: Volume = Volume()
         self.__construct_layout()
+        self.__progressbar.seek_requested.connect(self.seek_requested)
         self.set_style()
 
     @property
