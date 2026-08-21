@@ -96,7 +96,7 @@ The **Special** menu has a short credits screen thanking contributors.
 ## Installation
 
 **Prebuilt installer:** grab the latest installer from the
-[Releases](https://github.com/SergeyVasilyan/wwm-midi-player/releases) page
+[Releases](https://github.com/KrapFey/wwm-midi-player/releases) page
 and run it.
 
 **From source:** this project uses [uv](https://docs.astral.sh/uv/) for
@@ -106,7 +106,7 @@ environment/dependency management.
 # Install uv (skip if you already have it)
 powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 
-git clone https://github.com/SergeyVasilyan/wwm-midi-player.git
+git clone https://github.com/KrapFey/wwm-midi-player.git
 cd wwm-midi-player
 uv venv --seed
 .venv\Scripts\activate

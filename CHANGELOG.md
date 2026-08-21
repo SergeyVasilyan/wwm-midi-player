@@ -41,4 +41,4 @@ All notable changes to this project are documented here.
 - Installer's post-install "Launch app" step failing with *"CreateProcess failed; code 740"*
   on the app's elevation-required executable.
 
-[2.0.0]: https://github.com/SergeyVasilyan/wwm-midi-player/compare/v1.5...v2.0.0
+[2.0.0]: https://github.com/KrapFey/wwm-midi-player/compare/v1.5...v2.0.0

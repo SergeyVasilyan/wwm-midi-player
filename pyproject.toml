@@ -13,7 +13,7 @@ readme = "README.md"
 requires-python = ">=3.11,<3.14"
 license = { text = "GPL-3.0-or-later" }
 authors = [
-    { name = "Sergey Vasilyan" }
+    { name = "KrapFey" }
 ]
 keywords = [
     "WWM",
@@ -55,7 +55,7 @@ all = [
 wwm-player = "app:main"
 
 [project.urls]
-Repository = "https://github.com/SergeyVasilyan/wwm-midi-player"
+Repository = "https://github.com/KrapFey/wwm-midi-player"
 
 [tool.setuptools]
 package-dir = { "" = "src" }

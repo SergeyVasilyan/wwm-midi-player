@@ -32,7 +32,7 @@ requests, discussions) and when representing the project in public spaces.
 ## Enforcement
 
 Instances of unacceptable behavior may be reported by opening a
-[private security advisory](https://github.com/SergeyVasilyan/wwm-midi-player/security)
+[private security advisory](https://github.com/KrapFey/wwm-midi-player/security)
 or contacting the maintainer directly through GitHub. All reports will be
 reviewed and investigated, and will result in a response deemed necessary
 and appropriate to the circumstances. Maintainers are obligated to respect

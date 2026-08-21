@@ -10,7 +10,7 @@ please update before reporting an issue.
 Please **do not** open a public GitHub issue for security vulnerabilities.
 
 Instead, use GitHub's private reporting: go to the
-[Security tab](https://github.com/SergeyVasilyan/wwm-midi-player/security)
+[Security tab](https://github.com/KrapFey/wwm-midi-player/security)
 of this repository and click **"Report a vulnerability"**. This opens a
 private advisory visible only to the maintainer until a fix is ready.
 

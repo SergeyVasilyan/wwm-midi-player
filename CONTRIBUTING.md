@@ -5,7 +5,7 @@ Thanks for considering a contribution to the WWM MIDI Player.
 ## Development setup
 
 ```bash
-git clone https://github.com/SergeyVasilyan/wwm-midi-player.git
+git clone https://github.com/KrapFey/wwm-midi-player.git
 cd wwm-midi-player
 python -m venv .venv
 .venv\Scripts\activate
