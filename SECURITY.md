@@ -1,19 +1,41 @@
 # Security Policy
 
-## Supported Versions
-We support the latest stable release of the MIDI Player.
+## Supported versions
 
-|Version|Supported|
-|-------|---------|
-| Latest|    ✅   |
-| Older |    ❌   |
+Only the latest release is supported. If you're on an older version,
+please update before reporting an issue.
 
-## Reporting a Vulnerability
+## Reporting a vulnerability
 
-If you discover a security issue:
+Please **do not** open a public GitHub issue for security vulnerabilities.
 
-1. Do not open a public issue.
-2. Email the maintainer directly.
-3. Provide details to reproduce the vulnerability.
+Instead, use GitHub's private reporting: go to the
+[Security tab](https://github.com/SergeyVasilyan/wwm-midi-player/security)
+of this repository and click **"Report a vulnerability"**. This opens a
+private advisory visible only to the maintainer until a fix is ready.
 
-We will respond within 7 days and aim to release a fix within 30 days.
+Please include:
+
+- A description of the vulnerability and its potential impact.
+- Steps to reproduce it (a sample `.mid` file, if the issue is triggered by
+  loading one, is especially helpful).
+- Any relevant environment details (Windows version, whether you're running
+  from source or the installer build).
+
+We'll acknowledge reports within a few days and aim to ship a fix as soon
+as practical, coordinating disclosure timing with you.
+
+## Scope
+
+Realistic areas of concern for this project:
+
+- **MIDI file parsing** — the app parses arbitrary `.mid`/`.midi` files
+  (via `mido`) that a user opens; a malformed file causing a crash or
+  resource exhaustion is in scope.
+- **WWM mode input injection** — the app posts synthetic key events (via
+  `pywin32`) only to the specific *Where Winds Meet* window it locates by
+  title; anything that lets it target or affect other windows/processes
+  would be a real bug.
+
+This is a small, actively-developed hobby project — please be patient, and
+thank you for helping keep it safe to use.

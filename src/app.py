@@ -519,9 +519,17 @@ class Player(QMainWindow):
 
     @Slot()
     def __on_toast_dismissed(self) -> None:
-        """Remove the toast from the layout once it's dismissed."""
+        """Remove the toast from the layout once it's dismissed.
+
+        hide() first: QLayout.removeWidget() only detaches the widget from
+        layout management, it does not hide it - without an explicit hide(),
+        the toast keeps rendering at its last on-screen position until
+        deleteLater()'s deferred deletion actually runs, which isn't
+        guaranteed to happen before the next repaint.
+        """
         if self.__toast is None:
             return
+        self.__toast.hide()
         self.__central_layout.removeWidget(self.__toast)
         self.__toast.deleteLater()
         self.__toast = None
