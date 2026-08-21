@@ -47,6 +47,7 @@ from ui.toast import Toast
 from ui.track_list_panel import TrackListPanel
 from ui.viewer import Viewer
 from ui.visualizer import PianoVisualizer
+from utils.app_settings import AppSettings, load_settings, save_settings
 from utils.common import (
     RADIUS_SM,
     RESIZE_MARGIN,
@@ -361,6 +362,8 @@ class Player(QMainWindow):
         self.__visualizer: PianoVisualizer
         self.__visualizer_timer: QTimer
         self.__muted_tracks: set[int] = set()
+        self.__soloed_track: int|None = None
+        self.__loaded_track_indices: set[int] = set()
         self.__track_list_panel: TrackListPanel
         self.__stacked_playlist: QStackedLayout
         self.__playlist_tab_group: QButtonGroup
@@ -368,6 +371,7 @@ class Player(QMainWindow):
         self.__construct_layout()
         self.__wire_now_playing_bar()
         self.__bind_shortcuts()
+        self.__load_saved_settings()
 
     def __bind_shortcuts(self) -> None:
         """Bind shortcuts.
@@ -384,6 +388,36 @@ class Player(QMainWindow):
         keyboard.add_hotkey("f10", lambda: self.hotkey_triggered.emit("play"))
         keyboard.add_hotkey("f11", lambda: self.hotkey_triggered.emit("next"))
         keyboard.add_hotkey("f8", lambda: self.hotkey_triggered.emit("mode"))
+
+    def __load_saved_settings(self) -> None:
+        """Restore volume, Audio/WWM mode, and the last playlist/selection from disk.
+
+        Only restores the selection (so Play/Next/Previous pick up where you
+        left off and the header shows the right title) - it deliberately
+        does not mark the row as "now playing" (set_now_playing_row), since
+        nothing is actually playing yet at startup.
+        """
+        settings: AppSettings = load_settings()
+        self.__now_playing_bar.volume.setValue(settings.volume)
+        self.__now_playing_bar.mode_toggle.setChecked(settings.is_audio_mode)
+        self.__files = [f for f in settings.playlist if Path(f).exists()]
+        if not self.__files:
+            return
+        self.__current_index = (settings.current_index
+                                 if 0 <= settings.current_index < len(self.__files) else 0)
+        self.__add_songs()
+        self.__songs.widget.setCurrentRow(self.__current_index)
+        info: TrackInfo = parse_track_info(Path(self.__files[self.__current_index]).name)
+        self.__now_playing_bar.set_header(info.title, info.artist)
+
+    def __save_settings_to_disk(self) -> None:
+        """Persist volume, Audio/WWM mode, and the current playlist/selection."""
+        save_settings(AppSettings(
+            volume=self.__now_playing_bar.volume.value(),
+            is_audio_mode=self.__now_playing_bar.mode_toggle.isChecked(),
+            playlist=list(self.__files),
+            current_index=self.__current_index,
+        ))
 
     @Slot(str)
     def __on_hotkey(self, name: str) -> None:
@@ -431,18 +465,43 @@ class Player(QMainWindow):
     @Slot(list)
     def __on_tracks_ready(self, tracks: list[TrackSummary]) -> None:
         """Populate the track panel for the freshly-loaded song."""
+        self.__loaded_track_indices = {track.index for track in tracks}
         self.__track_list_panel.load_tracks(tracks)
+
+    def __apply_muted_tracks(self) -> None:
+        """Push the current mute set to the running Worker (if any) and the visualizer."""
+        if self.__thread is not None and self.__thread.isRunning():
+            self.__thread.set_muted_tracks(frozenset(self.__muted_tracks))
+        self.__visualizer.set_muted_tracks(set(self.__muted_tracks))
 
     @Slot(int, bool)
     def __on_track_toggled(self, track: int, enabled: bool) -> None:
         """Update one track's mute state; propagate live to the running Worker and visualizer."""
+        if self.__soloed_track is not None:
+            # A manual mute change breaks the "only the soloed track is
+            # audible" invariant - drop out of solo rather than leave the
+            # solo button showing a state that's no longer true.
+            self.__soloed_track = None
+            self.__track_list_panel.set_soloed_track(None)
         if enabled:
             self.__muted_tracks.discard(track)
         else:
             self.__muted_tracks.add(track)
-        if self.__thread is not None and self.__thread.isRunning():
-            self.__thread.set_muted_tracks(frozenset(self.__muted_tracks))
-        self.__visualizer.set_muted_tracks(set(self.__muted_tracks))
+        self.__apply_muted_tracks()
+
+    @Slot(int, bool)
+    def __on_track_soloed(self, track: int, soloed: bool) -> None:
+        """Solo isolates one track by muting every other loaded track.
+
+        Soloing the already-soloed track again (soloed=False, since the
+        button is checkable) restores every track to audible instead of
+        trying to reconstruct whatever mute set existed before the solo.
+        """
+        self.__soloed_track = track if soloed else None
+        self.__muted_tracks = (self.__loaded_track_indices - {track}) if soloed else set()
+        self.__track_list_panel.set_muted_tracks(set(self.__muted_tracks))
+        self.__track_list_panel.set_soloed_track(self.__soloed_track)
+        self.__apply_muted_tracks()
 
     @Slot()
     def __update_visualizer_position(self) -> None:
@@ -551,6 +610,7 @@ class Player(QMainWindow):
         """
         if previous_index != self.__current_index:
             self.__muted_tracks.clear()
+            self.__soloed_track = None
 
     def __songs_on_double_click(self, item: QListWidgetItem) -> None:
         """Play track when double-clicked in song."""
@@ -606,6 +666,8 @@ class Player(QMainWindow):
         self.__visualizer.clear()
         self.__track_list_panel.clear()
         self.__muted_tracks.clear()
+        self.__soloed_track = None
+        self.__loaded_track_indices.clear()
         self.__files.clear()
         self.__current_index = -1
         self.__songs.set_now_playing_row(-1)
@@ -856,6 +918,7 @@ class Player(QMainWindow):
         """Construct the Tracks page (stack index 1): per-track mute rows for the current song."""
         self.__track_list_panel = TrackListPanel()
         self.__track_list_panel.track_toggled.connect(self.__on_track_toggled)
+        self.__track_list_panel.track_soloed.connect(self.__on_track_soloed)
         return self.__track_list_panel
 
     @staticmethod
@@ -991,6 +1054,7 @@ class Player(QMainWindow):
     @override
     def closeEvent(self, event: QCloseEvent, /) -> None:
         """Override close event."""
+        self.__save_settings_to_disk()
         if self.__thread and self.__thread.isRunning():
             self.__thread.stop()
             self.__thread.wait()
