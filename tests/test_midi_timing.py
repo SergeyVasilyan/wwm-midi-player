@@ -4,6 +4,7 @@ import mido
 import pytest
 
 from utils.midi_timing import (
+    TickClock,
     build_tempo_map,
     calculate_duration,
     find_max_end_tick,
@@ -90,3 +91,23 @@ def test_calculate_duration_end_to_end() -> None:
         ),
     )
     assert calculate_duration(midi) == pytest.approx(0.5)
+
+
+def test_tick_clock_constant_tempo() -> None:
+    clock = TickClock([(0, 500_000)], ticks_per_beat=480)
+    assert clock.seconds_at(480) == pytest.approx(0.5)
+    assert clock.seconds_at(960) == pytest.approx(1.0)
+
+
+def test_tick_clock_across_tempo_change() -> None:
+    clock = TickClock([(0, 500_000), (240, 250_000)], ticks_per_beat=480)
+    # First 240 ticks at 120bpm (0.25s) + remaining 240 ticks at 240bpm (0.125s).
+    assert clock.seconds_at(480) == pytest.approx(0.375)
+
+
+def test_tick_clock_matches_ticks_to_seconds_incrementally() -> None:
+    midi = mido.MidiFile(ticks_per_beat=480)
+    tempo_map = [(0, 500_000), (240, 250_000), (720, 1_000_000)]
+    clock = TickClock(tempo_map, ticks_per_beat=480)
+    for tick in (100, 240, 480, 720, 960):
+        assert clock.seconds_at(tick) == pytest.approx(ticks_to_seconds(midi, tick, tempo_map))

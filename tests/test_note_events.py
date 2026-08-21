@@ -5,7 +5,12 @@ import time
 import mido
 import pytest
 
-from utils.note_events import DRUM_CHANNEL, build_note_events
+from utils.note_events import (
+    DRUM_CHANNEL,
+    build_note_events,
+    extract_track_names,
+    summarize_tracks,
+)
 
 
 def _track(*messages: mido.Message) -> mido.MidiTrack:
@@ -152,7 +157,7 @@ def test_many_tempo_changes_stay_fast() -> None:
     # Regression guard: build_note_events used to call ticks_to_seconds()
     # (an O(tempo changes) full re-walk) once per note on/off, making this
     # O(events * tempo changes) and slow enough on tempo-heavy files to
-    # block the GUI thread when switching tracks. The incremental _TickClock
+    # block the GUI thread when switching tracks. The incremental TickClock
     # should keep this roughly linear regardless of tempo change count.
     midi = mido.MidiFile(ticks_per_beat=480)
     messages = []
@@ -166,3 +171,61 @@ def test_many_tempo_changes_stay_fast() -> None:
     elapsed = time.perf_counter() - start
     assert len(events) == 2000
     assert elapsed < 1.0
+
+
+def test_extract_track_names_uses_track_name_meta() -> None:
+    midi = mido.MidiFile(ticks_per_beat=480)
+    midi.tracks.append(_track(mido.MetaMessage("track_name", name="Piano", time=0)))
+    midi.tracks.append(_track(mido.Message("note_on", channel=0, note=60, velocity=100, time=0)))
+    assert extract_track_names(midi) == ["Piano", "Track 2"]
+
+
+def test_extract_track_names_falls_back_when_blank() -> None:
+    midi = mido.MidiFile(ticks_per_beat=480)
+    midi.tracks.append(_track(mido.MetaMessage("track_name", name="   ", time=0)))
+    assert extract_track_names(midi) == ["Track 1"]
+
+
+def test_summarize_tracks_excludes_note_less_tracks() -> None:
+    midi = mido.MidiFile(ticks_per_beat=480)
+    midi.tracks.append(_track(mido.MetaMessage("set_tempo", tempo=500_000, time=0)))
+    midi.tracks.append(_track(
+        mido.MetaMessage("track_name", name="Melody", time=0),
+        mido.Message("note_on", channel=0, note=60, velocity=100, time=0),
+        mido.Message("note_off", channel=0, note=60, velocity=0, time=480),
+    ))
+    events = build_note_events(midi)
+    summaries = summarize_tracks(midi, events)
+    assert len(summaries) == 1
+    assert summaries[0].index == 1
+    assert summaries[0].name == "Melody"
+    assert not summaries[0].is_drum
+
+
+def test_summarize_tracks_flags_drum_track() -> None:
+    midi = mido.MidiFile(ticks_per_beat=480)
+    midi.tracks.append(_track(
+        mido.Message("note_on", channel=DRUM_CHANNEL, note=36, velocity=100, time=0),
+        mido.Message("note_off", channel=DRUM_CHANNEL, note=36, velocity=0, time=240),
+    ))
+    events = build_note_events(midi)
+    summaries = summarize_tracks(midi, events)
+    assert len(summaries) == 1
+    assert summaries[0].is_drum
+
+
+def test_summarize_tracks_ascending_index_order() -> None:
+    midi = mido.MidiFile(ticks_per_beat=480)
+    # Track 1 sounds first chronologically, but track order should follow
+    # midi.tracks index, not first-note order.
+    midi.tracks.append(_track(
+        mido.Message("note_on", channel=0, note=72, velocity=100, time=480),
+        mido.Message("note_off", channel=0, note=72, velocity=0, time=480),
+    ))
+    midi.tracks.append(_track(
+        mido.Message("note_on", channel=0, note=60, velocity=100, time=0),
+        mido.Message("note_off", channel=0, note=60, velocity=0, time=240),
+    ))
+    events = build_note_events(midi)
+    summaries = summarize_tracks(midi, events)
+    assert [summary.index for summary in summaries] == [0, 1]

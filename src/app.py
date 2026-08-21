@@ -21,6 +21,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QApplication,
+    QButtonGroup,
     QFileDialog,
     QHBoxLayout,
     QLineEdit,
@@ -29,6 +30,8 @@ from PySide6.QtWidgets import (
     QMenu,
     QMenuBar,
     QMessageBox,
+    QPushButton,
+    QStackedLayout,
     QVBoxLayout,
     QWidget,
 )
@@ -41,15 +44,34 @@ from ui.song_delegate import ARTIST_ROLE, TITLE_ROLE
 from ui.special import SpecialDialog
 from ui.titlebar import TitleBar
 from ui.toast import Toast
+from ui.track_list_panel import TrackListPanel
 from ui.viewer import Viewer
 from ui.visualizer import PianoVisualizer
-from utils.common import RADIUS_SM, RESIZE_MARGIN, SPACING_MD, Colors, resource_path
+from utils.common import (
+    RADIUS_SM,
+    RESIZE_MARGIN,
+    SPACING_MD,
+    SPACING_XS,
+    Colors,
+    resource_path,
+)
 from utils.midi_timing import calculate_duration
-from utils.note_events import DRUM_CHANNEL, NoteEvent, build_note_events
+from utils.note_events import (
+    DRUM_CHANNEL,
+    NoteEvent,
+    TrackSummary,
+    build_note_events,
+    summarize_tracks,
+)
+from utils.playback_stream import PlaybackMessage, build_playback_messages
 from utils.playlist import next_track_index
 from utils.track_info import TrackInfo, parse_track_info
 from utils.window_geometry import compute_resize_edges
 from utils.wwm_macro import KeyManager
+
+# Headroom (relative dB) applied to the shared synth's output so dense
+# chords/many simultaneous channels at high volume don't sum past 0dBFS.
+SYNTH_GAIN_DB: float = -6.0
 
 
 class Worker(QThread):
@@ -59,9 +81,11 @@ class Worker(QThread):
     error: Signal = Signal(str)
     track_ended: Signal = Signal()
     notes_ready: Signal = Signal(list)
+    tracks_ready: Signal = Signal(list)
 
     def __init__(self, filename: str, synth: tinysoundfont.Synth|None,
-                      is_audio: bool=False, start_offset: float=0.0) -> None:
+                      is_audio: bool=False, start_offset: float=0.0,
+                      muted_tracks: frozenset[int]=frozenset()) -> None:
         """Initialize worker.
 
         synth is a shared, already-started, already-soundfont-loaded Synth
@@ -73,6 +97,9 @@ class Worker(QThread):
         forwards through messages up to that point (still applying
         program/control changes so instrument state is correct) without
         actually sounding notes or sleeping, then resumes normal playback.
+
+        muted_tracks is the initial set of MIDI track indices to silence;
+        set_muted_tracks() updates it live while this Worker is running.
         """
         super().__init__()
         self.__is_audio: bool = is_audio
@@ -83,6 +110,11 @@ class Worker(QThread):
         self.__paused: bool = False
         self.__volume: int = 100
         self.__sent_volume: int|None = None
+        # GM default channel volume is 100; tracks commonly send their own
+        # CC7 to set a per-channel mix balance, which __volume must scale
+        # rather than overwrite (see __send_channel_volume).
+        self.__channel_base_volume: list[int] = [100] * 16
+        self.__muted_tracks: frozenset[int] = muted_tracks
         self.__start_time: float = 0.0
         self.__last_song_time: float = start_offset
         self.__start_offset: float = start_offset
@@ -91,6 +123,16 @@ class Worker(QThread):
     def paused(self) -> bool:
         """Return pause state."""
         return self.__paused
+
+    def set_muted_tracks(self, tracks: frozenset[int]) -> None:
+        """Live-update muted tracks; takes effect on the next tick flush.
+
+        Swap-by-reference, not in-place mutation - matches __running/
+        __paused/__volume/__channel_base_volume's existing lock-free pattern
+        in this class. Player always hands in a fresh frozenset, so a read
+        here mid-swap always sees one fully-formed set or the other.
+        """
+        self.__muted_tracks = tracks
 
     def elapsed_seconds(self) -> float:
         """Return seconds elapsed in the current song, frozen while paused.
@@ -109,16 +151,27 @@ class Worker(QThread):
         """Calculate overall duration."""
         self.duration_ready.emit(calculate_duration(midi))
 
-    def __add_note(self, synth: tinysoundfont.Synth|None, msg: mido.Message,
+    def __add_note(self, synth: tinysoundfont.Synth|None, track: int, msg: mido.Message,
                          chord_notes: list[tuple[int, int, int]]) -> None:
-        """Add note details."""
+        """Add a chord note, or apply a note_off.
+
+        Only note_on is filtered by the current mute set - a note_off is
+        always forwarded even if its track has since been muted, so an
+        already-sounding note (audio mode) finishes at its own
+        written-in-file length instead of hanging until the next
+        stop/pause/all-notes-off. WWM has no sustain concept (each note_on
+        is one discrete keydown+keyup pulse via play_chord), so muting there
+        is inherently immediate.
+        """
         if msg.type == "note_on" and msg.velocity > 0:
-            chord_notes.append((msg.channel, msg.note, msg.velocity))
+            if track not in self.__muted_tracks:
+                chord_notes.append((msg.channel, msg.note, msg.velocity))
         elif msg.type == "note_off" and self.__is_audio:
             synth.noteoff(msg.channel, msg.note)
 
     def __flush_tick_events(self, handle: int, synth: tinysoundfont.Synth|None,
-                                  tick_events: list[mido.Message], mute: bool=False) -> None:
+                                  tick_events: list[tuple[int, mido.Message]],
+                                  mute: bool=False) -> None:
         """Flush tick events.
 
         mute discards the batch without sounding anything - used while fast-
@@ -131,8 +184,8 @@ class Worker(QThread):
             tick_events.clear()
             return
         chord_notes: list[tuple[int, int, int]] = []
-        for msg in tick_events:
-            self.__add_note(synth, msg, chord_notes)
+        for track, msg in tick_events:
+            self.__add_note(synth, track, msg, chord_notes)
         if chord_notes:
             if self.__is_audio:
                 for channel, n, velocity in chord_notes:
@@ -141,11 +194,16 @@ class Worker(QThread):
                 self.__key_manager.play_chord(handle, [n for _, n, _ in chord_notes])
         tick_events.clear()
 
+    def __send_channel_volume(self, synth: tinysoundfont.Synth, channel: int) -> None:
+        """Send channel's combined (file base x our master slider) volume."""
+        combined: int = (self.__channel_base_volume[channel] * self.__volume) // 127
+        synth.control_change(channel, 7, combined)
+
     def __apply_volume(self, synth: tinysoundfont.Synth|None) -> None:
-        """Send the current volume to the synth only when it has actually changed."""
+        """Re-send every channel's combined volume when the master slider has changed."""
         if synth is not None and self.__volume != self.__sent_volume:
             for channel in range(16):
-                synth.control_change(channel, 7, self.__volume)
+                self.__send_channel_volume(synth, channel)
             self.__sent_volume = self.__volume
 
     def __wait_until(self, start_time: float, target_song_time: float) -> None:
@@ -186,15 +244,18 @@ class Worker(QThread):
             # GM channel 10 (0-indexed 9) defaults to a drum kit even when the
             # file never sends an explicit program_change for it.
             synth.program_change(DRUM_CHANNEL, 0, is_drums=True)
-        tick_events: list[mido.Message] = []
+        tick_events: list[tuple[int, mido.Message]] = []
         natural_end: bool = True
         try:
             self.__calculate_duration(player)
-            self.notes_ready.emit(build_note_events(player))
+            events: list[NoteEvent] = build_note_events(player)
+            self.notes_ready.emit(events)
+            self.tracks_ready.emit(summarize_tracks(player, events))
+            messages: list[PlaybackMessage] = build_playback_messages(player)
             current_song_time: float = .0
             skipping: bool = self.__start_offset > 0.0
             self.__start_time = time.perf_counter()
-            for msg in player:
+            for pm in messages:
                 if not self.__running:
                     natural_end = False
                     break
@@ -207,12 +268,12 @@ class Worker(QThread):
                     while self.__paused and self.__running:
                         time.sleep(0.05)
                     self.__start_time += (time.perf_counter() - pause_start)
-                if msg.time > 0:
+                if pm.time > current_song_time:
                     # All messages accumulated so far share the tick that has
                     # already elapsed - flush them as one chord before waiting
                     # for the next tick.
                     self.__flush_tick_events(handle, synth, tick_events, mute=skipping)
-                    current_song_time += msg.time
+                    current_song_time = pm.time
                     if skipping and current_song_time >= self.__start_offset:
                         # Fast-forward is done: re-anchor the clock so
                         # __wait_until treats current_song_time as "now"
@@ -221,10 +282,19 @@ class Worker(QThread):
                         self.__start_time = time.perf_counter() - current_song_time
                     if not skipping:
                         self.__wait_until(self.__start_time, current_song_time)
+                msg: mido.Message = pm.message
                 if msg.type in ("note_on", "note_off"):
-                    tick_events.append(msg)
+                    tick_events.append((pm.track, msg))
                 elif msg.type == "control_change" and self.__is_audio and synth is not None:
-                    synth.control_change(msg.channel, msg.control, msg.value)
+                    if msg.control == 7:
+                        # Track the file's own per-channel mix balance
+                        # instead of forwarding it as-is, which would
+                        # silently override our master volume slider for
+                        # any channel the file sets volume on.
+                        self.__channel_base_volume[msg.channel] = msg.value
+                        self.__send_channel_volume(synth, msg.channel)
+                    else:
+                        synth.control_change(msg.channel, msg.control, msg.value)
                 elif msg.type == "program_change" and self.__is_audio and synth is not None:
                     synth.program_change(msg.channel, msg.program,
                                           is_drums=msg.channel == DRUM_CHANNEL)
@@ -274,7 +344,7 @@ class Player(QMainWindow):
         self.__repeat: bool = False
         self.__shuffle: bool = False
         self.__toast: Toast|None = None
-        self.__soundfont: Path = resource_path("GeneralUser.sf2")
+        self.__soundfont: Path = resource_path("TOH.sf2")
         self.__synth: tinysoundfont.Synth|None = None
         self.__current: int = 0
         self.__duration: int = 0
@@ -290,6 +360,10 @@ class Player(QMainWindow):
         self.__progress_timer: QTimer
         self.__visualizer: PianoVisualizer
         self.__visualizer_timer: QTimer
+        self.__muted_tracks: set[int] = set()
+        self.__track_list_panel: TrackListPanel
+        self.__stacked_playlist: QStackedLayout
+        self.__playlist_tab_group: QButtonGroup
         self.__construct_menu_bar()
         self.__construct_layout()
         self.__wire_now_playing_bar()
@@ -351,7 +425,24 @@ class Player(QMainWindow):
     def __on_notes_ready(self, events: list[NoteEvent]) -> None:
         """Load the freshly-parsed note events into the visualizer."""
         self.__visualizer.load_notes(events, self.__duration)
+        self.__visualizer.set_muted_tracks(set(self.__muted_tracks))
         self.__update_visualizer_timer_state()
+
+    @Slot(list)
+    def __on_tracks_ready(self, tracks: list[TrackSummary]) -> None:
+        """Populate the track panel for the freshly-loaded song."""
+        self.__track_list_panel.load_tracks(tracks)
+
+    @Slot(int, bool)
+    def __on_track_toggled(self, track: int, enabled: bool) -> None:
+        """Update one track's mute state; propagate live to the running Worker and visualizer."""
+        if enabled:
+            self.__muted_tracks.discard(track)
+        else:
+            self.__muted_tracks.add(track)
+        if self.__thread is not None and self.__thread.isRunning():
+            self.__thread.set_muted_tracks(frozenset(self.__muted_tracks))
+        self.__visualizer.set_muted_tracks(set(self.__muted_tracks))
 
     @Slot()
     def __update_visualizer_position(self) -> None:
@@ -398,9 +489,21 @@ class Player(QMainWindow):
         loading the 32MB SoundFont is the expensive part and it never changes.
         """
         if self.__synth is None:
-            self.__synth = tinysoundfont.Synth()
+            # tinysoundfont's default gain (0dB) is unity per voice, so dense
+            # chords/many simultaneous instruments at high volume can sum
+            # past 0dBFS and clip into audible noise/crackling. Negative
+            # gain here gives headroom for polyphony, per the library's own
+            # guidance ("turn down the gain to avoid clipping").
+            self.__synth = tinysoundfont.Synth(gain=SYNTH_GAIN_DB)
             self.__synth.start()
-            self.__synth.program_select(0, self.__synth.sfload(self.__soundfont.as_posix()), 0, 0)
+            # sfload's own docs: "If more voices are required than are
+            # available, older voices will be cut off" - the 256 default can
+            # get exhausted during dense/fast-changing passages (one note
+            # may use several internal voices depending on the SoundFont's
+            # layering), audibly cutting still-sounding notes. Raise the cap
+            # well above what any real MIDI file needs concurrently.
+            sfid: int = self.__synth.sfload(self.__soundfont.as_posix(), max_voices=1024)
+            self.__synth.program_select(0, sfid, 0, 0)
         return self.__synth
 
     def __start_playback(self, start_offset: float=0.0) -> None:
@@ -420,12 +523,14 @@ class Player(QMainWindow):
         self.__songs.set_now_playing_row(self.__current_index)
         is_audio: bool = self.__now_playing_bar.mode_toggle.isChecked()
         synth: tinysoundfont.Synth|None = self.__get_synth() if is_audio else None
-        self.__thread = Worker(self.__files[self.__current_index], synth, is_audio, start_offset)
+        self.__thread = Worker(self.__files[self.__current_index], synth, is_audio, start_offset,
+                                frozenset(self.__muted_tracks))
         self.__thread.set_volume(self.__now_playing_bar.volume.value())
         self.__thread.duration_ready.connect(self.__duration_ready)
         self.__thread.error.connect(self.__show_error)
         self.__thread.track_ended.connect(self.__on_track_ended)
         self.__thread.notes_ready.connect(self.__on_notes_ready)
+        self.__thread.tracks_ready.connect(self.__on_tracks_ready)
         play_button: PlayButton = self.__now_playing_bar.play_button
         self.__thread.finished.connect(lambda: play_button.change.emit(False))
         self.__thread.finished.connect(self.__update_visualizer_timer_state)
@@ -434,9 +539,24 @@ class Player(QMainWindow):
         self.__now_playing_bar.set_header(info.title, info.artist)
         self.__update_visualizer_timer_state()
 
+    def __reset_muted_tracks_if_song_changed(self, previous_index: int) -> None:
+        """Clear per-track mute state only on an actual song change, not a same-song restart.
+
+        Comparing indices (rather than clearing unconditionally at every
+        "change track" call site) correctly persists mutes both across a
+        seek-triggered restart (which never reassigns __current_index at
+        all) and across a repeat-wraparound restart of a single-track/
+        single-song playlist (where next_track_index() legitimately returns
+        the same index).
+        """
+        if previous_index != self.__current_index:
+            self.__muted_tracks.clear()
+
     def __songs_on_double_click(self, item: QListWidgetItem) -> None:
         """Play track when double-clicked in song."""
+        previous_index: int = self.__current_index
         self.__current_index = self.__songs.widget.row(item)
+        self.__reset_muted_tracks_if_song_changed(previous_index)
         self.__start_playback()
 
     def __on_search_changed(self, text: str) -> None:
@@ -484,6 +604,8 @@ class Player(QMainWindow):
             self.__progress_timer.stop()
         self.__visualizer_timer.stop()
         self.__visualizer.clear()
+        self.__track_list_panel.clear()
+        self.__muted_tracks.clear()
         self.__files.clear()
         self.__current_index = -1
         self.__songs.set_now_playing_row(-1)
@@ -516,7 +638,9 @@ class Player(QMainWindow):
     def __previous_on_click(self) -> None:
         """Previous button on click callback."""
         if self.__files and self.__current_index > 0:
+            previous_index: int = self.__current_index
             self.__current_index -= 1
+            self.__reset_muted_tracks_if_song_changed(previous_index)
             self.__start_playback()
 
     def __play_on_click(self) -> None:
@@ -547,7 +671,9 @@ class Player(QMainWindow):
         """Next button on click callback."""
         index: int|None = self.__next_index()
         if index is not None:
+            previous_index: int = self.__current_index
             self.__current_index = index
+            self.__reset_muted_tracks_if_song_changed(previous_index)
             self.__start_playback()
 
     @Slot()
@@ -717,12 +843,70 @@ class Player(QMainWindow):
         self.__search.textChanged.connect(self.__on_search_changed)
         return self.__search
 
-    def __construct_playlist(self) -> QVBoxLayout:
-        """Construct playlist section."""
-        layout: QVBoxLayout = QVBoxLayout()
+    def __construct_songs_page(self) -> QWidget:
+        """Construct the Songs page (stack index 0): search box + playlist viewer."""
+        page: QWidget = QWidget()
+        layout: QVBoxLayout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.__construct_search())
         layout.addWidget(self.__construct_songs_section(), stretch=1)
+        return page
+
+    def __construct_tracks_page(self) -> TrackListPanel:
+        """Construct the Tracks page (stack index 1): per-track mute rows for the current song."""
+        self.__track_list_panel = TrackListPanel()
+        self.__track_list_panel.track_toggled.connect(self.__on_track_toggled)
+        return self.__track_list_panel
+
+    @staticmethod
+    def __make_tab_button(text: str) -> QPushButton:
+        """Construct a checkable tab-style button for the Songs/Tracks switch."""
+        button: QPushButton = QPushButton(text)
+        button.setCheckable(True)
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        button.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                color: #999999;
+                border: none;
+                border-bottom: 2px solid transparent;
+                padding: 4px 2px;
+            }}
+            QPushButton:checked {{
+                color: {Colors.WHITE.value.hex};
+                border-bottom: 2px solid {Colors.ACCENT_1.value.hex};
+            }}
+        """)
+        return button
+
+    def __construct_tab_row(self) -> QHBoxLayout:
+        """Construct the Songs/Tracks tab switch driving self.__stacked_playlist."""
+        songs_button: QPushButton = self.__make_tab_button("Songs")
+        tracks_button: QPushButton = self.__make_tab_button("Tracks")
+        songs_button.setChecked(True)
+        self.__playlist_tab_group = QButtonGroup(self)
+        self.__playlist_tab_group.setExclusive(True)
+        self.__playlist_tab_group.addButton(songs_button, 0)
+        self.__playlist_tab_group.addButton(tracks_button, 1)
+        self.__playlist_tab_group.idClicked.connect(self.__stacked_playlist.setCurrentIndex)
+        layout: QHBoxLayout = QHBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(SPACING_XS)
+        layout.addWidget(songs_button)
+        layout.addWidget(tracks_button)
+        layout.addStretch()
+        return layout
+
+    def __construct_playlist(self) -> QVBoxLayout:
+        """Construct playlist section: tab switch above a Songs/Tracks stacked view."""
+        self.__stacked_playlist = QStackedLayout()
+        self.__stacked_playlist.addWidget(self.__construct_songs_page())
+        self.__stacked_playlist.addWidget(self.__construct_tracks_page())
+        layout: QVBoxLayout = QVBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(SPACING_MD)
+        layout.addLayout(self.__construct_tab_row())
+        layout.addLayout(self.__stacked_playlist, stretch=1)
         return layout
 
     def __construct_content_row(self) -> QHBoxLayout:

@@ -37,7 +37,12 @@ class ToggleSwitch(QAbstractButton):
         self.__offset: int = 2
         self.__knob_size: int = self.__height - (self.__offset * 2)
         self.__position: float = self.__offset
-        self.setMinimumSize(self.__width, self.__height)
+        # Fixed, not just minimum: paintEvent's track uses the real widget
+        # size while the knob's stop positions are computed from __width/
+        # __height, so if a parent layout (e.g. a stretch=1 row) grew this
+        # widget wider than that, the two would disagree and the knob would
+        # visibly rest short of the track's actual edge.
+        self.setFixedSize(self.__width, self.__height)
         self.__animation: QPropertyAnimation = QPropertyAnimation(self, b"position", self)
         self.__animation.setDuration(250)
         self.__animation.setEasingCurve(QEasingCurve.Type.InOutCubic)

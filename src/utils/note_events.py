@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 import mido
 
-from utils.midi_timing import build_tempo_map
+from utils.midi_timing import TickClock, build_tempo_map
 
 DRUM_CHANNEL: int = 9  # GM channel 10 (0-indexed) is reserved for percussion.
 
@@ -27,40 +27,13 @@ class NoteEvent:
     track: int
 
 
-class _TickClock:
-    """Converts a single track's monotonically increasing absolute ticks to seconds.
+@dataclass(frozen=True, slots=True)
+class TrackSummary:
+    """A track eligible for the mute UI: its midi.tracks index, display name, and swatch flavor."""
 
-    utils.midi_timing.ticks_to_seconds() re-walks the whole tempo map from
-    tick 0 on every call, which is fine for the one-off duration calculation
-    it was written for, but calling it once per note on/off made
-    build_note_events O(events * tempo changes) - slow enough on
-    tempo-change-heavy files (common in expressive film/game scores) to
-    visibly stall the GUI thread's mandatory Worker.wait() when switching
-    tracks. Ticks only increase within one track, so this instead walks the
-    tempo map forward incrementally, making the whole precompute O(events +
-    tempo changes).
-    """
-
-    def __init__(self, tempo_map: list[tuple[int, int]], ticks_per_beat: int) -> None:
-        self.__tempo_map: list[tuple[int, int]] = tempo_map
-        self.__ticks_per_beat: int = ticks_per_beat
-        self.__index: int = 0
-        self.__elapsed: float = 0.0
-        self.__prev_tick, self.__prev_tempo = tempo_map[0]
-
-    def seconds_at(self, abs_ticks: int) -> float:
-        """Return the elapsed seconds at abs_ticks; abs_ticks must not decrease between calls."""
-        tempo_map: list[tuple[int, int]] = self.__tempo_map
-        while self.__index + 1 < len(tempo_map) and tempo_map[self.__index + 1][0] <= abs_ticks:
-            next_tick, next_tempo = tempo_map[self.__index + 1]
-            segment_ticks: int = next_tick - self.__prev_tick
-            self.__elapsed += mido.tick2second(segment_ticks, self.__ticks_per_beat,
-                                                self.__prev_tempo)
-            self.__prev_tick, self.__prev_tempo = next_tick, next_tempo
-            self.__index += 1
-        segment_ticks = abs_ticks - self.__prev_tick
-        return self.__elapsed + mido.tick2second(segment_ticks, self.__ticks_per_beat,
-                                                   self.__prev_tempo)
+    index: int
+    name: str
+    is_drum: bool
 
 
 def build_note_events(midi: mido.MidiFile) -> list[NoteEvent]:
@@ -83,7 +56,7 @@ def build_note_events(midi: mido.MidiFile) -> list[NoteEvent]:
     events: list[NoteEvent] = []
     for track_index, track in enumerate(midi.tracks):
         abs_ticks: int = 0
-        clock: _TickClock = _TickClock(tempo_map, midi.ticks_per_beat)
+        clock: TickClock = TickClock(tempo_map, midi.ticks_per_beat)
         for msg in track:
             abs_ticks += msg.time
             if msg.type == "program_change":
@@ -105,3 +78,39 @@ def build_note_events(midi: mido.MidiFile) -> list[NoteEvent]:
                                  channel == DRUM_CHANNEL, track_index))
     events.sort(key=lambda event: event.start)
     return events
+
+
+def extract_track_names(midi: mido.MidiFile) -> list[str]:
+    """Return one display name per midi.tracks entry.
+
+    Reads each track's first MetaMessage("track_name"); a track with none
+    (or a blank/whitespace-only one) falls back to "Track {index + 1}"
+    (1-based, matching how DAWs number tracks for end users).
+    """
+    names: list[str] = []
+    for index, track in enumerate(midi.tracks):
+        name: str = ""
+        for msg in track:
+            if msg.type == "track_name":
+                name = msg.name.strip()
+                break
+        names.append(name or f"Track {index + 1}")
+    return names
+
+
+def summarize_tracks(midi: mido.MidiFile, events: list[NoteEvent]) -> list[TrackSummary]:
+    """Return one TrackSummary per track that actually produced a note event.
+
+    Pure meta/conductor tracks (e.g. a tempo-only track 0 in most format-1
+    files) are skipped since they have nothing to mute. Order is ascending
+    midi.tracks index, not first-note order, so the mute panel is stable
+    across reloads. is_drum reflects whether the track emitted at least one
+    drum-channel note, used only for the panel's swatch color - the falling
+    notes themselves are still colored per-event via NoteEvent.is_drum,
+    unaffected by this simplification.
+    """
+    names: list[str] = extract_track_names(midi)
+    used_tracks: set[int] = {event.track for event in events}
+    drum_tracks: set[int] = {event.track for event in events if event.is_drum}
+    return [TrackSummary(index, names[index], index in drum_tracks)
+            for index in sorted(used_tracks)]

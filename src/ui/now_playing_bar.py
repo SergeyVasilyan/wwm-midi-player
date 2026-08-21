@@ -1,6 +1,7 @@
 """Persistent bottom-docked Now Playing bar: track info, transport, progress, volume."""
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from ui.buttons.next import NextButton
@@ -12,6 +13,12 @@ from ui.progressbar import ProgressBar
 from ui.toggle_switch import ToggleSwitch
 from ui.volume_slider import Volume
 from utils.common import SPACING_MD, SPACING_SM, Colors
+
+# Fixed width shared by both the title/artist column and the volume/mode
+# column: long track/artist names elide instead of growing the left side,
+# and matching widths on both sides keep the transport/progress area
+# centered on the window rather than just centered within the leftover gap.
+SIDE_COLUMN_WIDTH: int = 220
 
 
 class NowPlayingBar(QFrame):
@@ -26,9 +33,11 @@ class NowPlayingBar(QFrame):
         self.__title_label.setStyleSheet(
             f"font-weight: bold; font-size: 16px; background: transparent; "
             f"color: {Colors.WHITE.value.hex};")
+        self.__title_label.setFixedWidth(SIDE_COLUMN_WIDTH)
         self.__artist_label: QLabel = QLabel("")
         self.__artist_label.setStyleSheet(
             "color: #999999; font-size: 12px; background: transparent;")
+        self.__artist_label.setFixedWidth(SIDE_COLUMN_WIDTH)
         self.__artist_label.setVisible(False)
         self.__progressbar: ProgressBar = ProgressBar()
         self.__current_seconds: int = 0
@@ -90,10 +99,17 @@ class NowPlayingBar(QFrame):
         """Convert seconds to humane format MM:SS."""
         return divmod(seconds, 60)
 
+    @staticmethod
+    def __set_elided_text(label: QLabel, text: str) -> None:
+        """Set label's text elided to its fixed width, with the full text as a tooltip."""
+        metrics: QFontMetrics = QFontMetrics(label.font())
+        label.setText(metrics.elidedText(text, Qt.TextElideMode.ElideRight, SIDE_COLUMN_WIDTH))
+        label.setToolTip(text)
+
     def set_header(self, title: str, artist: str="") -> None:
-        """Set the now-playing header text."""
-        self.__title_label.setText(title)
-        self.__artist_label.setText(artist)
+        """Set the now-playing header text, eliding long titles/artists."""
+        self.__set_elided_text(self.__title_label, title)
+        self.__set_elided_text(self.__artist_label, artist)
         self.__artist_label.setVisible(bool(artist))
 
     def set_duration(self, seconds: int) -> None:
@@ -170,10 +186,18 @@ class NowPlayingBar(QFrame):
         label.setStyleSheet(f"color: {Colors.WHITE.value.hex}; background: transparent;")
         return label
 
-    def __construct_right_column(self) -> QVBoxLayout:
-        """Construct the volume + mode-toggle column."""
-        layout: QVBoxLayout = QVBoxLayout()
-        layout.setContentsMargins(0, 0, 0, 0)
+    def __construct_right_column(self) -> QWidget:
+        """Construct the volume + mode-toggle column, right-aligned in a fixed-width slot.
+
+        Wrapped in a SIDE_COLUMN_WIDTH-wide container (rather than added as a
+        bare layout) so it matches the header column's width; a leading
+        stretch keeps the actual controls flush against the window's right
+        edge - same as before - instead of letting them get pulled toward
+        center or, worse, stretched to fill the extra width themselves
+        (which would visibly distort the fixed-size mode toggle).
+        """
+        content: QVBoxLayout = QVBoxLayout()
+        content.setContentsMargins(0, 0, 0, 0)
         volume_row: QHBoxLayout = QHBoxLayout()
         volume_row.addWidget(self.__make_caption_label("Volume"))
         volume_row.addWidget(self.__volume)
@@ -181,9 +205,16 @@ class NowPlayingBar(QFrame):
         mode_row.addWidget(self.__make_caption_label("WWM"))
         mode_row.addWidget(self.__mode_toggle, stretch=1)
         mode_row.addWidget(self.__make_caption_label("Audio"))
-        layout.addLayout(volume_row)
-        layout.addLayout(mode_row)
-        return layout
+        content.addLayout(volume_row)
+        content.addLayout(mode_row)
+        outer: QHBoxLayout = QHBoxLayout()
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addStretch()
+        outer.addLayout(content)
+        container: QWidget = QWidget()
+        container.setLayout(outer)
+        container.setFixedWidth(SIDE_COLUMN_WIDTH)
+        return container
 
     def __construct_layout(self) -> None:
         """Construct NowPlayingBar layout."""
@@ -192,7 +223,7 @@ class NowPlayingBar(QFrame):
         layout.setSpacing(SPACING_MD)
         layout.addLayout(self.__construct_header())
         layout.addLayout(self.__construct_center_column(), stretch=1)
-        layout.addLayout(self.__construct_right_column())
+        layout.addWidget(self.__construct_right_column())
 
     def set_style(self) -> None:
         """Apply the panel background and top divider."""

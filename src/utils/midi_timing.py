@@ -22,6 +22,44 @@ def build_tempo_map(midi: mido.MidiFile) -> list[tuple[int, int]]:
     return sorted(clean_tempo_map.items())
 
 
+class TickClock:
+    """Converts a single track's monotonically increasing absolute ticks to seconds.
+
+    ticks_to_seconds() re-walks the whole tempo map from tick 0 on every
+    call, which is fine for the one-off duration calculation it was written
+    for, but calling it once per event would make a per-track precompute
+    O(events * tempo changes) - slow enough on tempo-change-heavy files
+    (common in expressive film/game scores) to stall the GUI thread's
+    mandatory Worker.wait(). Ticks only increase within one track, so this
+    instead walks the tempo map forward incrementally, making a full
+    per-track walk O(events + tempo changes). Used by both
+    utils.note_events.build_note_events (visualizer precompute) and
+    utils.playback_stream.build_playback_messages (live playback).
+    """
+
+    def __init__(self, tempo_map: list[tuple[int, int]], ticks_per_beat: int) -> None:
+        """Initialize TickClock for one track, sharing the file's tempo_map."""
+        self.__tempo_map: list[tuple[int, int]] = tempo_map
+        self.__ticks_per_beat: int = ticks_per_beat
+        self.__index: int = 0
+        self.__elapsed: float = 0.0
+        self.__prev_tick, self.__prev_tempo = tempo_map[0]
+
+    def seconds_at(self, abs_ticks: int) -> float:
+        """Return the elapsed seconds at abs_ticks; abs_ticks must not decrease between calls."""
+        tempo_map: list[tuple[int, int]] = self.__tempo_map
+        while self.__index + 1 < len(tempo_map) and tempo_map[self.__index + 1][0] <= abs_ticks:
+            next_tick, next_tempo = tempo_map[self.__index + 1]
+            segment_ticks: int = next_tick - self.__prev_tick
+            self.__elapsed += mido.tick2second(segment_ticks, self.__ticks_per_beat,
+                                                self.__prev_tempo)
+            self.__prev_tick, self.__prev_tempo = next_tick, next_tempo
+            self.__index += 1
+        segment_ticks = abs_ticks - self.__prev_tick
+        return self.__elapsed + mido.tick2second(segment_ticks, self.__ticks_per_beat,
+                                                   self.__prev_tempo)
+
+
 def find_max_end_tick(midi: mido.MidiFile) -> int:
     """Find max end tick value."""
     max_end_tick: int = 0

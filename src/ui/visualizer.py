@@ -39,6 +39,7 @@ class PianoVisualizer(QWidget):
         self.__max_note_duration: float = 0.0
         self.__duration: float = 0.0
         self.__position: float = 0.0
+        self.__muted_tracks: set[int] = set()
         self.__geometry_width: float = -1.0
         self.__key_geometry: dict[int, tuple[float, float]] = {}
         self.setAutoFillBackground(False)
@@ -57,6 +58,11 @@ class PianoVisualizer(QWidget):
         self.__position = seconds
         self.update()
 
+    def set_muted_tracks(self, tracks: set[int]) -> None:
+        """Hide falling notes/keyboard highlights for the given tracks; repaints immediately."""
+        self.__muted_tracks = tracks
+        self.update()
+
     def clear(self) -> None:
         """Reset to the empty/idle state (stop, track switch, playlist clear)."""
         self.__events = []
@@ -64,6 +70,7 @@ class PianoVisualizer(QWidget):
         self.__max_note_duration = 0.0
         self.__duration = 0.0
         self.__position = 0.0
+        self.__muted_tracks = set()
         self.update()
 
     def __ensure_key_geometry(self) -> None:
@@ -103,6 +110,8 @@ class PianoVisualizer(QWidget):
         for event in self.__events[first_index:]:
             if event.start > window_end:
                 break
+            if event.track in self.__muted_tracks:
+                continue
             if event.end >= window_start:
                 visible.append(event)
         return visible
