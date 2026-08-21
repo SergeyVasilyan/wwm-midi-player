@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wwm-midi-player"
-version = "1.4.0"
+version = "2.0.0"
 description = "A simple application for playing MIDI files in WWM"
 readme = "README.md"
 # Capped below 3.14: pyaudio (a transitive dependency via tinysoundfont) has no
