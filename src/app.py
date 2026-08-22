@@ -17,6 +17,7 @@ from PySide6.QtGui import (
     QGuiApplication,
     QIcon,
     QMouseEvent,
+    QResizeEvent,
     Qt,
 )
 from PySide6.QtWidgets import (
@@ -356,6 +357,7 @@ class Player(QMainWindow):
         self.__repeat_action: QAction
         self.__shuffle_action: QAction
         self.__central_layout: QVBoxLayout
+        self.__content_widget: QWidget
         self.__title_bar: TitleBar
         self.__menu_bar: QMenuBar
         self.__progress_timer: QTimer
@@ -519,18 +521,23 @@ class Player(QMainWindow):
 
     @Slot()
     def __on_toast_dismissed(self) -> None:
-        """Remove the toast from the layout once it's dismissed.
+        """Release the toast once its own fade-out animation has finished hiding it."""
+        if self.__toast is None:
+            return
+        self.__toast.deleteLater()
+        self.__toast = None
 
-        hide() first: QLayout.removeWidget() only detaches the widget from
-        layout management, it does not hide it - without an explicit hide(),
-        the toast keeps rendering at its last on-screen position until
-        deleteLater()'s deferred deletion actually runs, which isn't
-        guaranteed to happen before the next repaint.
+    def __clear_toast(self) -> None:
+        """Immediately remove any current toast, without waiting for its fade-out.
+
+        Used when a new toast (or a successful retry) supersedes the old one
+        right away - animating the old one out first would leave it visible,
+        briefly overlapping the new one in the same corner.
         """
         if self.__toast is None:
             return
+        self.__toast.dismissed.disconnect(self.__on_toast_dismissed)
         self.__toast.hide()
-        self.__central_layout.removeWidget(self.__toast)
         self.__toast.deleteLater()
         self.__toast = None
 
@@ -543,11 +550,9 @@ class Player(QMainWindow):
         self.__update_visualizer_timer_state()
         self.__now_playing_bar.reset_progress()
         self.__songs.set_now_playing_row(-1)
-        if self.__toast is not None:
-            self.__on_toast_dismissed()
-        self.__toast = Toast(msg, self)
+        self.__clear_toast()
+        self.__toast = Toast(msg, self.__content_widget)
         self.__toast.dismissed.connect(self.__on_toast_dismissed)
-        self.__central_layout.insertWidget(0, self.__toast)
 
     def __get_synth(self) -> tinysoundfont.Synth:
         """Return the shared audio synth, creating and loading it on first use.
@@ -578,11 +583,10 @@ class Player(QMainWindow):
         if self.__thread and self.__thread.isRunning():
             self.__thread.stop()
             self.__thread.wait()
-        if self.__toast is not None:
-            # A leftover error from a previous attempt (e.g. WWM mode with the
-            # game not running) would otherwise sit on screen for up to
-            # DISMISS_AFTER_MS even after this new attempt succeeds.
-            self.__on_toast_dismissed()
+        # A leftover error from a previous attempt (e.g. WWM mode with the
+        # game not running) would otherwise sit on screen for up to
+        # DISMISS_AFTER_MS even after this new attempt succeeds.
+        self.__clear_toast()
         if start_offset <= 0.0:
             self.__visualizer.clear()
         self.__seek_offset = start_offset
@@ -1001,12 +1005,12 @@ class Player(QMainWindow):
         self.__title_bar = TitleBar(self, "WWM MIDI Player", icon)
         root_layout.addWidget(self.__title_bar)
         root_layout.addWidget(self.__menu_bar)
-        content: QWidget = QWidget()
-        self.__central_layout = QVBoxLayout(content)
+        self.__content_widget = QWidget()
+        self.__central_layout = QVBoxLayout(self.__content_widget)
         self.__central_layout.setContentsMargins(SPACING_MD, SPACING_MD, SPACING_MD, SPACING_MD)
         self.__central_layout.setSpacing(SPACING_MD)
         self.__central_layout.addLayout(self.__construct_content_row(), stretch=1)
-        root_layout.addWidget(content, stretch=1)
+        root_layout.addWidget(self.__content_widget, stretch=1)
         self.__visualizer_timer = QTimer(self)
         # PreciseTimer: Qt's default coarse timer can drift/coalesce by tens of
         # milliseconds on Windows, which reads as visible stutter in the falling
@@ -1058,6 +1062,13 @@ class Player(QMainWindow):
         if event.type() == QEvent.Type.WindowStateChange:
             self.__title_bar.set_maximized(self.isMaximized())
         super().changeEvent(event)
+
+    @override
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        """Keep a visible toast anchored to the top-right corner as the window resizes."""
+        if self.__toast is not None:
+            self.__toast.reposition()
+        super().resizeEvent(event)
 
     @override
     def closeEvent(self, event: QCloseEvent, /) -> None:
