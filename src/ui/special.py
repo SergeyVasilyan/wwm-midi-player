@@ -17,7 +17,11 @@ class SpecialDialog(QDialog):
     """Special Dialog."""
 
     def __init__(self, parent: QWidget|None=None) -> None:
-        """INIT."""
+        """Initialize the Special (credits) dialog.
+
+        Args:
+            parent: Optional parent widget; also supplies the window icon.
+        """
         super().__init__(parent)
         if parent:
             self.setWindowIcon(parent.windowIcon())
@@ -27,7 +31,7 @@ class SpecialDialog(QDialog):
         self.__create_layout()
 
     def __create_layout(self) -> None:
-        """Create Dialog layout."""
+        """Create the dialog's full layout."""
         layout: QGridLayout = QGridLayout()
         row: int = 0
         header: QLabel = QLabel("Special thanks to")

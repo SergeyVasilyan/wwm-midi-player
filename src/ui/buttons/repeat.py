@@ -16,13 +16,21 @@ class RepeatButton(CheckableIconButton):
     """Repeat toggle Button widget."""
 
     def __init__(self, parent: QWidget|None=None) -> None:
-        """Initialize Repeat Button widget."""
+        """Initialize Repeat Button widget.
+
+        Args:
+            parent: Optional parent widget.
+        """
         super().__init__(parent=parent)
         self.setToolTip("Repeat")
 
     @override
     def paintEvent(self, event: QPaintEvent) -> None:
-        """Override paint event."""
+        """Draw the button's circular background and repeat-loop glyph.
+
+        Args:
+            event: The Qt paint event.
+        """
         painter: QPainter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         circle: QRectF = self._scaled_rect()

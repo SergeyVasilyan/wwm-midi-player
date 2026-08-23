@@ -16,6 +16,12 @@ def resource_path(path: str) -> Path:
     working directory. Callers pass a path as it exists in the source tree (e.g.
     ``"src/input/logo.ico"``); if that path doesn't exist and an ``_internal``
     directory is present, the ``_internal``-prefixed location is returned instead.
+
+    Args:
+        path: Resource path as it exists in the source tree.
+
+    Returns:
+        The resolved path, adjusted for a PyInstaller onedir build if needed.
     """
     resolved: Path = Path(path)
     if resolved.exists() or not Path("_internal").is_dir():
@@ -28,7 +34,17 @@ class Singleton(type):
     _instances: dict[Callable, Callable] = {}
 
     def __call__(cls, *args, **kwargs) -> Callable:
-        """Override object call dunder method."""
+        """Return the shared instance, constructing it on first call.
+
+        Args:
+            *args: Positional arguments forwarded to the class constructor
+                on first call; ignored on subsequent calls.
+            **kwargs: Keyword arguments forwarded to the class constructor
+                on first call; ignored on subsequent calls.
+
+        Returns:
+            The singleton instance of cls.
+        """
         if cls not in cls._instances:
             instance = super().__call__(*args, **kwargs)
             cls._instances[cls] = instance
@@ -74,7 +90,14 @@ CHANNEL_COLORS: tuple[str, ...] = (
 
 
 def channel_color_hex(channel: int) -> str:
-    """Return the hex color for a MIDI channel, wrapping defensively via modulo 16."""
+    """Return the hex color for a MIDI channel, wrapping defensively via modulo 16.
+
+    Args:
+        channel: MIDI channel number; wrapped via modulo 16 if out of range.
+
+    Returns:
+        The channel's hex color string, e.g. "#4FC3F7".
+    """
     return CHANNEL_COLORS[channel % 16]
 
 # Index 9 is reserved exclusively for drum-channel notes (see note_color_hex)
@@ -92,6 +115,13 @@ def note_color_hex(track: int, is_drum: bool) -> str:
     would collapse them all into a single color. Drum-channel notes still get
     the same reserved color regardless of track, so percussion always stands
     out.
+
+    Args:
+        track: Originating MIDI track index.
+        is_drum: Whether the note is on the GM percussion channel.
+
+    Returns:
+        The note's hex color string.
     """
     if is_drum:
         return CHANNEL_COLORS[9]

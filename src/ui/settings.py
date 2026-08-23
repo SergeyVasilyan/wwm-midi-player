@@ -17,7 +17,11 @@ class SettingsDialog(QDialog):
     """Simple Settings selection Dialog."""
 
     def __init__(self, parent: QWidget|None=None) -> None:
-        """INIT."""
+        """Initialize the Settings dialog.
+
+        Args:
+            parent: Optional parent widget; also supplies the window icon.
+        """
         super().__init__(parent)
         if parent:
             self.setWindowIcon(parent.windowIcon())
@@ -27,12 +31,20 @@ class SettingsDialog(QDialog):
         self.__create_layout()
 
     def __open_key_configurator_on_click(self) -> None:
-        """Open KeyConfigurator button click callback."""
+        """Open the KeyConfigurator dialog modally."""
         dialog: KeyConfigurator = KeyConfigurator(self)
         dialog.exec()
 
     def __construct_key_binding_section(self, layout: QGridLayout, row: int) -> int:
-        """Construct key binding configuration section."""
+        """Add the "Configure keybindings" row.
+
+        Args:
+            layout: The grid layout to add the row to.
+            row: The next free row index in layout.
+
+        Returns:
+            The next free row index after the added row.
+        """
         button: QPushButton = QPushButton()
         button.setText("Open")
         button.clicked.connect(self.__open_key_configurator_on_click)
@@ -42,7 +54,7 @@ class SettingsDialog(QDialog):
         return row + 1
 
     def __create_layout(self) -> None:
-        """Create Dialog layout."""
+        """Create the dialog's full layout."""
         layout: QGridLayout = QGridLayout()
         row: int = 0
         row = self.__construct_key_binding_section(layout, row)

@@ -21,7 +21,11 @@ class PlayButton(AbstractButton):
     change: Signal = Signal(bool)
 
     def __init__(self, parent: QWidget|None=None) -> None:
-        """Initialize Play/Pause Button widget."""
+        """Initialize Play/Pause Button widget.
+
+        Args:
+            parent: Optional parent widget.
+        """
         super().__init__(parent=parent, size=PRIMARY_SIZE)
         self.__is_playing: bool = False
         self.__morph: AnimatedProgress = AnimatedProgress(
@@ -29,12 +33,21 @@ class PlayButton(AbstractButton):
         self.change.connect(self.__toggle_state)
 
     def __on_morph_changed(self, _value: float) -> None:
-        """Repaint as the play/pause morph animation progresses."""
+        """Repaint as the play/pause morph animation progresses.
+
+        Args:
+            _value: The animation's current progress (0..1); unused, since
+                painting reads the morph value directly.
+        """
         self.update()
 
     @Slot(bool)
     def __toggle_state(self, new_state: bool) -> None:
-        """Start animation."""
+        """Animate the glyph toward play or pause, if the state actually changed.
+
+        Args:
+            new_state: True to morph toward the pause glyph, False for play.
+        """
         if self.__is_playing == new_state:
             return
         self.__is_playing = new_state
@@ -42,7 +55,11 @@ class PlayButton(AbstractButton):
 
     @override
     def paintEvent(self, _event: QPaintEvent) -> None:
-        """Override paint event."""
+        """Draw the button's circular background and play/pause glyph.
+
+        Args:
+            _event: The Qt paint event; unused (paints based on internal state).
+        """
         painter: QPainter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         circle: QRectF = self._scaled_rect()

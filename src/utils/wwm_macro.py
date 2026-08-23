@@ -23,6 +23,14 @@ def fold_note(note: int, note_min: int = NOTE_MIN, note_max: int = NOTE_MAX) -> 
     above it always land on the highest octave, so pitch class (the note
     "name") is always preserved exactly - only octave information for notes
     more than one octave outside the range can be lost.
+
+    Args:
+        note: The MIDI note number to fold.
+        note_min: Lower bound of the target range, inclusive.
+        note_max: Upper bound of the target range, inclusive.
+
+    Returns:
+        The folded note number, within [note_min, note_max].
     """
     while note < note_min:
         note += OCTAVE
@@ -97,17 +105,31 @@ class KeyManager(metaclass=Singleton):
 
     @property
     def default_bindings(self) -> dict[str, dict[str, str]]:
-        """Return default keybindings."""
+        """Return the built-in default keybindings, keyed by octave register then scale degree.
+
+        Returns:
+            The default keybindings, as {octave: {degree: key}}.
+        """
         return self.__default_bindings
 
     @property
     def bindings(self) -> dict[str, dict[str, str]]:
-        """Return current keybindings."""
+        """Return the current (possibly user-remapped) keybindings.
+
+        Returns:
+            The active keybindings, as {octave: {degree: key}}.
+        """
         return self.__bindings
 
     @Slot(str, str, str)
     def update_keybinding(self, octave: str, note: str, new_key: str) -> None:
-        """Update keybindings."""
+        """Rebind one scale degree's key, keeping its sharp/flat variants in sync.
+
+        Args:
+            octave: Octave register to update ("low", "med", or "high").
+            note: Scale degree to rebind (e.g. "1", "3").
+            new_key: The new key string to bind (e.g. "Q", "Shift+Q").
+        """
         octave_info: dict[str, str] = self.__bindings.get(octave, {})
         if not octave_info:
             return
@@ -155,7 +177,14 @@ class KeyManager(metaclass=Singleton):
                     self.__mapping[note] = key
 
     def __get_note(self, note: int) -> str|None:
-        """Fold note into [48, 83] by octaves to reach playable range."""
+        """Fold note into [48, 83] by octaves to reach playable range.
+
+        Args:
+            note: The MIDI note number to look up.
+
+        Returns:
+            The bound key string for this note, or None if unmapped.
+        """
         return self.__mapping.get(fold_note(note, self._Note.MIN, self._Note.MAX), None)
 
     def __scan_code(self, vk_code: int) -> int:
@@ -164,6 +193,12 @@ class KeyManager(metaclass=Singleton):
         MapVirtualKey is a deterministic Windows API call - the same vk_code
         always yields the same scan code, so repeating it for every keypress
         of a long song is pure overhead.
+
+        Args:
+            vk_code: The Windows virtual-key code to convert.
+
+        Returns:
+            The corresponding hardware scan code.
         """
         scan_code: int|None = self.__scan_code_cache.get(vk_code)
         if scan_code is None:
@@ -172,7 +207,14 @@ class KeyManager(metaclass=Singleton):
         return scan_code
 
     def __vk_scan(self, main_char: str) -> int:
-        """Return the virtual-key code for a character, caching per character."""
+        """Return the virtual-key code for a character, caching per character.
+
+        Args:
+            main_char: The character to convert (e.g. "Q").
+
+        Returns:
+            The corresponding Windows virtual-key code.
+        """
         vk: int|None = self.__vk_scan_cache.get(main_char)
         if vk is None:
             vk = win32api.VkKeyScan(main_char) & 0xFF
@@ -183,6 +225,13 @@ class KeyManager(metaclass=Singleton):
         """Construct the complex lParam integer that Windows expects.
 
         This mimics the hardware details of a keypress.
+
+        Args:
+            key: The virtual-key code the lParam is being built for.
+            is_down: Whether this is a key-down (True) or key-up (False) event.
+
+        Returns:
+            The packed lParam value for WM_KEYDOWN/WM_KEYUP.
         """
         scan_code: int = self.__scan_code(key)
         lparam: int = 1
@@ -193,14 +242,24 @@ class KeyManager(metaclass=Singleton):
         return lparam
 
     def __post_key_event(self, handle: int, vk_code: int) -> None:
-        """Send a complete Press & Release cycle."""
+        """Send a complete Press & Release cycle.
+
+        Args:
+            handle: Window handle to post the key events to.
+            vk_code: Virtual-key code to press and release.
+        """
         lparam_down: int = self.__make_lparam(vk_code, True)
         lparam_up: int = self.__make_lparam(vk_code, False)
         win32api.PostMessage(handle, win32con.WM_KEYDOWN, vk_code, lparam_down)
         win32api.PostMessage(handle, win32con.WM_KEYUP, vk_code, lparam_up)
 
     def __send_keypress_to_window(self, handle: int, key_string: str) -> None:
-        """Send keypress to a specified window."""
+        """Send keypress to a specified window.
+
+        Args:
+            handle: Window handle to post the key events to.
+            key_string: Key combo to send, e.g. "Q" or "Shift+Q".
+        """
         parts: list[str] = key_string.split("+")
         modifier_vk: int|None = None
         main_char: str = parts[-1]
@@ -218,11 +277,21 @@ class KeyManager(metaclass=Singleton):
             win32api.PostMessage(handle, win32con.WM_KEYUP, modifier_vk, lp_mod_up)
 
     def play_note(self, handle: int, note: int) -> None:
-        """Play note."""
+        """Play a single MIDI note by posting its bound key to the game window.
+
+        Args:
+            handle: Window handle of the game window to send the key to.
+            note: MIDI note number to play; unmapped notes are silently skipped.
+        """
         if key := self.__get_note(note):
             self.__send_keypress_to_window(handle, key)
 
     def play_chord(self, handle: int, notes: list[int]) -> None:
-        """Play chord."""
+        """Play every note in a chord by posting each one's bound key in turn.
+
+        Args:
+            handle: Window handle of the game window to send the keys to.
+            notes: MIDI note numbers to play.
+        """
         for n in notes:
             self.play_note(handle, n)

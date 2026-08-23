@@ -13,12 +13,23 @@ class ShuffleButton(CheckableIconButton):
     """Shuffle toggle Button widget."""
 
     def __init__(self, parent: QWidget|None=None) -> None:
-        """Initialize Shuffle Button widget."""
+        """Initialize Shuffle Button widget.
+
+        Args:
+            parent: Optional parent widget.
+        """
         super().__init__(parent=parent)
         self.setToolTip("Shuffle")
 
     def __draw_crossed_arrow(self, painter: QPainter, rect: QRectF, top: bool) -> None:
-        """Draw one of the two crossed arrows."""
+        """Draw one of the two crossed arrows that make up the shuffle glyph.
+
+        Args:
+            painter: The active painter to draw with.
+            rect: The bounding rect the arrow's line spans.
+            top: True to draw the arrow starting at the top-left corner,
+                False to draw the mirrored arrow starting at the bottom-left.
+        """
         y: float = rect.top() if top else rect.bottom()
         other_y: float = rect.bottom() if top else rect.top()
         start: QPointF = QPointF(rect.left(), y)
@@ -34,7 +45,11 @@ class ShuffleButton(CheckableIconButton):
 
     @override
     def paintEvent(self, event: QPaintEvent) -> None:
-        """Override paint event."""
+        """Draw the button's circular background and crossed-arrows glyph.
+
+        Args:
+            event: The Qt paint event.
+        """
         painter: QPainter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         circle: QRectF = self._scaled_rect()

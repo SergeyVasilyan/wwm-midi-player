@@ -8,6 +8,13 @@ def build_tempo_map(midi: mido.MidiFile) -> list[tuple[int, int]]:
 
     Default tempo is 500_000 (120 BPM). Tempo messages are taken from all tracks,
     but commonly live in track 0.
+
+    Args:
+        midi: The parsed MIDI file to scan for tempo changes.
+
+    Returns:
+        A list of (abs_tick, tempo) pairs, sorted by abs_tick, always
+        starting with (0, 500_000).
     """
     tempo_map: list[tuple[int, int]] = [(0, 500_000)]
     for track in midi.tracks:
@@ -38,7 +45,13 @@ class TickClock:
     """
 
     def __init__(self, tempo_map: list[tuple[int, int]], ticks_per_beat: int) -> None:
-        """Initialize TickClock for one track, sharing the file's tempo_map."""
+        """Initialize TickClock for one track, sharing the file's tempo_map.
+
+        Args:
+            tempo_map: (abs_tick, tempo) pairs from build_tempo_map(), shared
+                read-only across every track's own TickClock instance.
+            ticks_per_beat: The MIDI file's ticks-per-beat resolution.
+        """
         self.__tempo_map: list[tuple[int, int]] = tempo_map
         self.__ticks_per_beat: int = ticks_per_beat
         self.__index: int = 0
@@ -46,7 +59,15 @@ class TickClock:
         self.__prev_tick, self.__prev_tempo = tempo_map[0]
 
     def seconds_at(self, abs_ticks: int) -> float:
-        """Return the elapsed seconds at abs_ticks; abs_ticks must not decrease between calls."""
+        """Return the elapsed seconds at abs_ticks; abs_ticks must not decrease between calls.
+
+        Args:
+            abs_ticks: Absolute tick position within this track; must be
+                greater than or equal to the abs_ticks of the previous call.
+
+        Returns:
+            Elapsed seconds from the start of the track to abs_ticks.
+        """
         tempo_map: list[tuple[int, int]] = self.__tempo_map
         while self.__index + 1 < len(tempo_map) and tempo_map[self.__index + 1][0] <= abs_ticks:
             next_tick, next_tempo = tempo_map[self.__index + 1]
@@ -61,7 +82,15 @@ class TickClock:
 
 
 def find_max_end_tick(midi: mido.MidiFile) -> int:
-    """Find max end tick value."""
+    """Find max end tick value.
+
+    Args:
+        midi: The parsed MIDI file to scan.
+
+    Returns:
+        The absolute tick of the last note event across all tracks that
+        contain at least one note, or 0 if no track has any notes.
+    """
     max_end_tick: int = 0
     for track in midi.tracks:
         abs_ticks: int = 0
@@ -78,7 +107,16 @@ def find_max_end_tick(midi: mido.MidiFile) -> int:
 def ticks_to_seconds(
     midi: mido.MidiFile, max_end_tick: int, tempo_map: list[tuple[int, int]],
 ) -> float:
-    """Convert an absolute tick position to seconds by walking the tempo segments."""
+    """Convert an absolute tick position to seconds by walking the tempo segments.
+
+    Args:
+        midi: The parsed MIDI file (used for its ticks_per_beat resolution).
+        max_end_tick: The absolute tick to convert to seconds.
+        tempo_map: (abs_tick, tempo) pairs from build_tempo_map().
+
+    Returns:
+        The elapsed seconds from tick 0 to max_end_tick.
+    """
     ticks_per_beat: int = midi.ticks_per_beat
     total_seconds: float = 0.0
     previous_tick, previous_tempo = tempo_map[0]
@@ -98,7 +136,14 @@ def ticks_to_seconds(
 
 
 def calculate_duration(midi: mido.MidiFile) -> float:
-    """Calculate the overall duration of a MIDI file, in seconds."""
+    """Calculate the overall duration of a MIDI file, in seconds.
+
+    Args:
+        midi: The parsed MIDI file to measure.
+
+    Returns:
+        The file's total duration in seconds.
+    """
     tempo_map: list[tuple[int, int]] = build_tempo_map(midi)
     max_end_tick: int = find_max_end_tick(midi)
     return ticks_to_seconds(midi, max_end_tick, tempo_map)

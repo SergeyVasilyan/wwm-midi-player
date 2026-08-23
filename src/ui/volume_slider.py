@@ -10,7 +10,11 @@ class Volume(QSlider):
     """Volume slider widget.."""
 
     def __init__(self, parent: QWidget|None=None) -> None:
-        """Initialize Volume slider widget."""
+        """Initialize Volume slider widget.
+
+        Args:
+            parent: Optional parent widget.
+        """
         super().__init__(parent=parent)
         self.setOrientation(Qt.Orientation.Horizontal)
         self.setRange(0, 127)
@@ -18,7 +22,7 @@ class Volume(QSlider):
         self.set_style()
 
     def set_style(self) -> None:
-        """Override size hint."""
+        """Apply the gradient-filled track and handle styling."""
         self.setStyleSheet(f"""
             QSlider::groove:horizontal {{
                 background: {Colors.BACKGROUND_2.value.hex};

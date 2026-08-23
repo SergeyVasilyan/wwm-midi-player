@@ -102,6 +102,14 @@ class Worker(QThread):
 
         muted_tracks is the initial set of MIDI track indices to silence;
         set_muted_tracks() updates it live while this Worker is running.
+
+        Args:
+            filename: Path to the MIDI file to play.
+            synth: Shared audio synth to play through, or None in WWM mode.
+            is_audio: True for Audio mode (synth), False for WWM mode
+                (simulated keypresses).
+            start_offset: Seconds into the song to seek to before playing.
+            muted_tracks: MIDI track indices to silence from the start.
         """
         super().__init__()
         self.__is_audio: bool = is_audio
@@ -123,7 +131,11 @@ class Worker(QThread):
 
     @property
     def paused(self) -> bool:
-        """Return pause state."""
+        """Return pause state.
+
+        Returns:
+            True if playback is currently paused.
+        """
         return self.__paused
 
     def set_muted_tracks(self, tracks: frozenset[int]) -> None:
@@ -133,6 +145,9 @@ class Worker(QThread):
         __paused/__volume/__channel_base_volume's existing lock-free pattern
         in this class. Player always hands in a fresh frozenset, so a read
         here mid-swap always sees one fully-formed set or the other.
+
+        Args:
+            tracks: The MIDI track indices that should now be muted.
         """
         self.__muted_tracks = tracks
 
@@ -144,13 +159,20 @@ class Worker(QThread):
         drive its own wait loop, reading the same instance attributes run()
         maintains (float reads/writes are atomic under the GIL, matching the
         existing lock-free precedent for __paused/__running in this class).
+
+        Returns:
+            The current playback position in seconds.
         """
         if self.__paused:
             return self.__last_song_time
         return time.perf_counter() - self.__start_time
 
     def __calculate_duration(self, midi: mido.MidiFile) -> None:
-        """Calculate overall duration."""
+        """Calculate overall duration.
+
+        Args:
+            midi: The parsed MIDI file to measure.
+        """
         self.duration_ready.emit(calculate_duration(midi))
 
     def __add_note(self, synth: tinysoundfont.Synth|None, track: int, msg: mido.Message,
@@ -164,6 +186,13 @@ class Worker(QThread):
         stop/pause/all-notes-off. WWM has no sustain concept (each note_on
         is one discrete keydown+keyup pulse via play_chord), so muting there
         is inherently immediate.
+
+        Args:
+            synth: The shared audio synth, or None in WWM mode.
+            track: The MIDI track index msg originated from.
+            msg: The note_on/note_off message to process.
+            chord_notes: The current tick's accumulated (channel, note,
+                velocity) tuples; appended to in place for a passing note_on.
         """
         if msg.type == "note_on" and msg.velocity > 0:
             if track not in self.__muted_tracks:
@@ -179,6 +208,13 @@ class Worker(QThread):
         mute discards the batch without sounding anything - used while fast-
         forwarding through a seek, so skipped notes aren't heard/pressed all
         at once.
+
+        Args:
+            handle: The target window handle for WWM mode key injection.
+            synth: The shared audio synth, or None in WWM mode.
+            tick_events: The (track, message) pairs accumulated for the tick
+                that just elapsed; cleared in place once flushed.
+            mute: If True, discard the batch instead of sounding it.
         """
         if not tick_events:
             return
@@ -197,12 +233,21 @@ class Worker(QThread):
         tick_events.clear()
 
     def __send_channel_volume(self, synth: tinysoundfont.Synth, channel: int) -> None:
-        """Send channel's combined (file base x our master slider) volume."""
+        """Send channel's combined (file base x our master slider) volume.
+
+        Args:
+            synth: The shared audio synth.
+            channel: The MIDI channel to update.
+        """
         combined: int = (self.__channel_base_volume[channel] * self.__volume) // 127
         synth.control_change(channel, 7, combined)
 
     def __apply_volume(self, synth: tinysoundfont.Synth|None) -> None:
-        """Re-send every channel's combined volume when the master slider has changed."""
+        """Re-send every channel's combined volume when the master slider has changed.
+
+        Args:
+            synth: The shared audio synth, or None in WWM mode (no-op).
+        """
         if synth is not None and self.__volume != self.__sent_volume:
             for channel in range(16):
                 self.__send_channel_volume(synth, channel)
@@ -215,6 +260,10 @@ class Worker(QThread):
         short 1ms sleeps for accurate timing, instead of spin-sleeping in 1ms
         steps for the entire wait (which wastes CPU on long rests and is
         finer-grained than the OS timer can honor anyway).
+
+        Args:
+            start_time: The perf_counter() timestamp playback started from.
+            target_song_time: The song-time offset (seconds) to wait until.
         """
         fine_margin: float = 0.005
         while self.__running:
@@ -324,7 +373,11 @@ class Worker(QThread):
         self.__paused = not self.__paused
 
     def set_volume(self, volume: int) -> None:
-        """Set synth volume."""
+        """Set synth volume.
+
+        Args:
+            volume: The new master volume, in the MIDI CC7 range (0-127).
+        """
         self.__volume = volume
 
 class Player(QMainWindow):
@@ -423,7 +476,12 @@ class Player(QMainWindow):
 
     @Slot(str)
     def __on_hotkey(self, name: str) -> None:
-        """Dispatch a global hotkey on the GUI thread."""
+        """Dispatch a global hotkey on the GUI thread.
+
+        Args:
+            name: The hotkey action name ("previous", "play", "next", or
+                "mode").
+        """
         if name == "previous":
             self.__previous_on_click()
         elif name == "play":
@@ -435,7 +493,11 @@ class Player(QMainWindow):
 
     @Slot(float)
     def __duration_ready(self, duration: float) -> None:
-        """Set duration and start timer."""
+        """Set duration and start timer.
+
+        Args:
+            duration: The track's total duration in seconds.
+        """
         self.__current = int(self.__seek_offset)
         self.__seek_offset = 0.0
         self.__duration = int(duration)
@@ -459,14 +521,22 @@ class Player(QMainWindow):
 
     @Slot(list)
     def __on_notes_ready(self, events: list[NoteEvent]) -> None:
-        """Load the freshly-parsed note events into the visualizer."""
+        """Load the freshly-parsed note events into the visualizer.
+
+        Args:
+            events: The note events to visualize, pre-sorted by start time.
+        """
         self.__visualizer.load_notes(events, self.__duration)
         self.__visualizer.set_muted_tracks(set(self.__muted_tracks))
         self.__update_visualizer_timer_state()
 
     @Slot(list)
     def __on_tracks_ready(self, tracks: list[TrackSummary]) -> None:
-        """Populate the track panel for the freshly-loaded song."""
+        """Populate the track panel for the freshly-loaded song.
+
+        Args:
+            tracks: The tracks that produced at least one note event.
+        """
         self.__loaded_track_indices = {track.index for track in tracks}
         self.__track_list_panel.load_tracks(tracks)
 
@@ -478,7 +548,12 @@ class Player(QMainWindow):
 
     @Slot(int, bool)
     def __on_track_toggled(self, track: int, enabled: bool) -> None:
-        """Update one track's mute state; propagate live to the running Worker and visualizer."""
+        """Update one track's mute state; propagate live to the running Worker and visualizer.
+
+        Args:
+            track: The MIDI track index whose mute state changed.
+            enabled: True if the track should now be audible, False if muted.
+        """
         if self.__soloed_track is not None:
             # A manual mute change breaks the "only the soloed track is
             # audible" invariant - drop out of solo rather than leave the
@@ -498,6 +573,11 @@ class Player(QMainWindow):
         Soloing the already-soloed track again (soloed=False, since the
         button is checkable) restores every track to audible instead of
         trying to reconstruct whatever mute set existed before the solo.
+
+        Args:
+            track: The MIDI track index that was soloed or unsoloed.
+            soloed: True if track should now be the sole audible track,
+                False to restore every track to audible.
         """
         self.__soloed_track = track if soloed else None
         self.__muted_tracks = (self.__loaded_track_indices - {track}) if soloed else set()
@@ -543,7 +623,11 @@ class Player(QMainWindow):
 
     @Slot(str)
     def __show_error(self, msg: str) -> None:
-        """Show error message and stop counter."""
+        """Show error message and stop counter.
+
+        Args:
+            msg: The error message to display in the toast.
+        """
         with contextlib.suppress(AttributeError):
             self.__progress_timer.stop()
         self.__visualizer.clear()
@@ -559,6 +643,9 @@ class Player(QMainWindow):
 
         Reused across every track change instead of rebuilt per track, since
         loading the 32MB SoundFont is the expensive part and it never changes.
+
+        Returns:
+            The shared, already-started, already-soundfont-loaded synth.
         """
         if self.__synth is None:
             # tinysoundfont's default gain (0dB) is unity per voice, so dense
@@ -579,7 +666,11 @@ class Player(QMainWindow):
         return self.__synth
 
     def __start_playback(self, start_offset: float=0.0) -> None:
-        """Start playback, optionally seeking to start_offset seconds into the track."""
+        """Start playback, optionally seeking to start_offset seconds into the track.
+
+        Args:
+            start_offset: Seconds into the track to seek to before playing.
+        """
         if self.__thread and self.__thread.isRunning():
             self.__thread.stop()
             self.__thread.wait()
@@ -619,20 +710,32 @@ class Player(QMainWindow):
         all) and across a repeat-wraparound restart of a single-track/
         single-song playlist (where next_track_index() legitimately returns
         the same index).
+
+        Args:
+            previous_index: The playlist index that was current before this
+                call's track change.
         """
         if previous_index != self.__current_index:
             self.__muted_tracks.clear()
             self.__soloed_track = None
 
     def __songs_on_double_click(self, item: QListWidgetItem) -> None:
-        """Play track when double-clicked in song."""
+        """Play track when double-clicked in song.
+
+        Args:
+            item: The double-clicked song list item.
+        """
         previous_index: int = self.__current_index
         self.__current_index = self.__songs.widget.row(item)
         self.__reset_muted_tracks_if_song_changed(previous_index)
         self.__start_playback()
 
     def __on_search_changed(self, text: str) -> None:
-        """Filter songs by search text."""
+        """Filter songs by search text.
+
+        Args:
+            text: The search box's current text.
+        """
         needle: str = text.lower()
         songs = self.__songs.widget
         songs.setUpdatesEnabled(False)
@@ -731,13 +834,21 @@ class Player(QMainWindow):
 
     @Slot(int)
     def __on_seek_requested(self, seconds: int) -> None:
-        """Restart playback of the current track from the requested position."""
+        """Restart playback of the current track from the requested position.
+
+        Args:
+            seconds: The playback position to seek to.
+        """
         if self.__current_index == -1 or not self.__files:
             return
         self.__start_playback(start_offset=float(seconds))
 
     def __next_index(self) -> int|None:
-        """Return the index to advance to, honoring shuffle/repeat, or None to stop."""
+        """Return the index to advance to, honoring shuffle/repeat, or None to stop.
+
+        Returns:
+            The next playlist index, or None if playback should stop.
+        """
         return next_track_index(self.__current_index, len(self.__files),
                                  shuffle=self.__shuffle, repeat=self.__repeat)
 
@@ -756,15 +867,27 @@ class Player(QMainWindow):
         self.__next_on_click()
 
     def __set_repeat(self, checked: bool) -> None:
-        """Toggle repeat-playlist mode."""
+        """Toggle repeat-playlist mode.
+
+        Args:
+            checked: Whether repeat mode should be enabled.
+        """
         self.__repeat = checked
 
     def __set_shuffle(self, checked: bool) -> None:
-        """Toggle shuffle mode."""
+        """Toggle shuffle mode.
+
+        Args:
+            checked: Whether shuffle mode should be enabled.
+        """
         self.__shuffle = checked
 
     def __set_volume(self, value: int) -> None:
-        """Adjust FluidSynth volume gain."""
+        """Adjust FluidSynth volume gain.
+
+        Args:
+            value: The new master volume, in the MIDI CC7 range (0-127).
+        """
         if self.__thread and self.__thread.isRunning():
             self.__thread.set_volume(value)
 
@@ -906,19 +1029,31 @@ class Player(QMainWindow):
         """)
 
     def __construct_songs_section(self) -> Viewer:
-        """Construct Songs section."""
+        """Construct Songs section.
+
+        Returns:
+            The constructed song list viewer.
+        """
         self.__songs = Viewer()
         self.__songs.widget.itemDoubleClicked.connect(self.__songs_on_double_click)
         return self.__songs
 
     def __construct_search(self) -> QLineEdit:
-        """Construct the song search box."""
+        """Construct the song search box.
+
+        Returns:
+            The constructed search box.
+        """
         self.__search = SearchBox()
         self.__search.textChanged.connect(self.__on_search_changed)
         return self.__search
 
     def __construct_songs_page(self) -> QWidget:
-        """Construct the Songs page (stack index 0): search box + playlist viewer."""
+        """Construct the Songs page (stack index 0): search box + playlist viewer.
+
+        Returns:
+            The assembled Songs page widget.
+        """
         page: QWidget = QWidget()
         layout: QVBoxLayout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -927,7 +1062,11 @@ class Player(QMainWindow):
         return page
 
     def __construct_tracks_page(self) -> TrackListPanel:
-        """Construct the Tracks page (stack index 1): per-track mute rows for the current song."""
+        """Construct the Tracks page (stack index 1): per-track mute rows for the current song.
+
+        Returns:
+            The constructed track mute/solo panel.
+        """
         self.__track_list_panel = TrackListPanel()
         self.__track_list_panel.track_toggled.connect(self.__on_track_toggled)
         self.__track_list_panel.track_soloed.connect(self.__on_track_soloed)
@@ -935,7 +1074,14 @@ class Player(QMainWindow):
 
     @staticmethod
     def __make_tab_button(text: str) -> QPushButton:
-        """Construct a checkable tab-style button for the Songs/Tracks switch."""
+        """Construct a checkable tab-style button for the Songs/Tracks switch.
+
+        Args:
+            text: The button's label text.
+
+        Returns:
+            The constructed, styled tab button.
+        """
         button: QPushButton = QPushButton(text)
         button.setCheckable(True)
         button.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -955,7 +1101,11 @@ class Player(QMainWindow):
         return button
 
     def __construct_tab_row(self) -> QHBoxLayout:
-        """Construct the Songs/Tracks tab switch driving self.__stacked_playlist."""
+        """Construct the Songs/Tracks tab switch driving self.__stacked_playlist.
+
+        Returns:
+            The assembled tab row layout.
+        """
         songs_button: QPushButton = self.__make_tab_button("Songs")
         tracks_button: QPushButton = self.__make_tab_button("Tracks")
         songs_button.setChecked(True)
@@ -973,7 +1123,11 @@ class Player(QMainWindow):
         return layout
 
     def __construct_playlist(self) -> QVBoxLayout:
-        """Construct playlist section: tab switch above a Songs/Tracks stacked view."""
+        """Construct playlist section: tab switch above a Songs/Tracks stacked view.
+
+        Returns:
+            The assembled playlist column layout.
+        """
         self.__stacked_playlist = QStackedLayout()
         self.__stacked_playlist.addWidget(self.__construct_songs_page())
         self.__stacked_playlist.addWidget(self.__construct_tracks_page())
@@ -985,7 +1139,11 @@ class Player(QMainWindow):
         return layout
 
     def __construct_content_row(self) -> QHBoxLayout:
-        """Construct the split row: playlist on the left, visualizer on the right."""
+        """Construct the split row: playlist on the left, visualizer on the right.
+
+        Returns:
+            The assembled content row layout.
+        """
         self.__visualizer = PianoVisualizer()
         layout: QHBoxLayout = QHBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
@@ -1021,7 +1179,14 @@ class Player(QMainWindow):
         root_layout.addWidget(self.__now_playing_bar)
 
     def __cursor_for_edges(self, edges: Qt.Edge) -> Qt.CursorShape:
-        """Map a resize-edge combination to the appropriate resize cursor shape."""
+        """Map a resize-edge combination to the appropriate resize cursor shape.
+
+        Args:
+            edges: The window edge(s) the cursor is currently near.
+
+        Returns:
+            The cursor shape matching that edge combination.
+        """
         if edges in (Qt.Edge.LeftEdge, Qt.Edge.RightEdge):
             return Qt.CursorShape.SizeHorCursor
         if edges in (Qt.Edge.TopEdge, Qt.Edge.BottomEdge):
@@ -1034,7 +1199,11 @@ class Player(QMainWindow):
 
     @override
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
-        """Update cursor shape and pending resize edges based on proximity to window edges."""
+        """Update cursor shape and pending resize edges based on proximity to window edges.
+
+        Args:
+            event: The Qt mouse move event.
+        """
         if self.isMaximized():
             self.__resize_edges = Qt.Edge(0)
             self.setCursor(Qt.CursorShape.ArrowCursor)
@@ -1048,7 +1217,11 @@ class Player(QMainWindow):
 
     @override
     def mousePressEvent(self, event: QMouseEvent) -> None:
-        """Start an OS-native resize if the press is near a window edge."""
+        """Start an OS-native resize if the press is near a window edge.
+
+        Args:
+            event: The Qt mouse press event.
+        """
         if self.__resize_edges != Qt.Edge(0) and event.button() == Qt.MouseButton.LeftButton:
             handle = self.windowHandle()
             if handle is not None:
@@ -1058,21 +1231,33 @@ class Player(QMainWindow):
 
     @override
     def changeEvent(self, event: QEvent) -> None:
-        """Sync the title bar's maximize button with the actual window state."""
+        """Sync the title bar's maximize button with the actual window state.
+
+        Args:
+            event: The Qt change event.
+        """
         if event.type() == QEvent.Type.WindowStateChange:
             self.__title_bar.set_maximized(self.isMaximized())
         super().changeEvent(event)
 
     @override
     def resizeEvent(self, event: QResizeEvent) -> None:
-        """Keep a visible toast anchored to the top-right corner as the window resizes."""
+        """Keep a visible toast anchored to the top-right corner as the window resizes.
+
+        Args:
+            event: The Qt resize event.
+        """
         if self.__toast is not None:
             self.__toast.reposition()
         super().resizeEvent(event)
 
     @override
     def closeEvent(self, event: QCloseEvent, /) -> None:
-        """Override close event."""
+        """Persist settings and tear down the running worker/synth on window close.
+
+        Args:
+            event: The Qt close event.
+        """
         self.__save_settings_to_disk()
         if self.__thread and self.__thread.isRunning():
             self.__thread.stop()

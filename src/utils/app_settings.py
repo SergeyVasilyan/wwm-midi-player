@@ -17,7 +17,15 @@ SETTINGS_PATH: Path = resource_path("src/input/settings.json")
 
 @dataclass
 class AppSettings:
-    """Everything persisted between launches."""
+    """Everything persisted between launches.
+
+    Attributes:
+        volume: Master volume slider value (0-127).
+        is_audio_mode: True for Audio mode, False for WWM mode.
+        playlist: File paths of the last-loaded playlist.
+        current_index: Index into playlist of the last-selected track, or
+            -1 if none was selected.
+    """
 
     volume: int = DEFAULT_VOLUME
     is_audio_mode: bool = False
@@ -26,7 +34,15 @@ class AppSettings:
 
 
 def load_settings(path: Path = SETTINGS_PATH) -> AppSettings:
-    """Load settings from disk, falling back to defaults if missing or invalid."""
+    """Load settings from disk, falling back to defaults if missing or invalid.
+
+    Args:
+        path: Path to the settings JSON file.
+
+    Returns:
+        The loaded settings, or AppSettings() defaults if the file is
+        missing, unreadable, or malformed.
+    """
     if not path.exists():
         return AppSettings()
     try:
@@ -39,6 +55,11 @@ def load_settings(path: Path = SETTINGS_PATH) -> AppSettings:
 
 
 def save_settings(settings: AppSettings, path: Path = SETTINGS_PATH) -> None:
-    """Save settings to disk, overwriting any existing file."""
+    """Save settings to disk, overwriting any existing file.
+
+    Args:
+        settings: The settings to persist.
+        path: Path to write the settings JSON file to.
+    """
     with path.open("w", encoding="utf-8") as f:
         json.dump(asdict(settings), f, indent=4)

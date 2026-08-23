@@ -23,18 +23,30 @@ class MaximizeButton(AbstractButton):
     """
 
     def __init__(self, parent: QWidget|None=None) -> None:
-        """Initialize Maximize Button widget."""
+        """Initialize Maximize Button widget.
+
+        Args:
+            parent: Optional parent widget.
+        """
         super().__init__(parent=parent, size=SIZE)
         self.__maximized: bool = False
         self.setToolTip("Maximize")
 
     @property
     def maximized(self) -> bool:
-        """Return whether the button currently reflects a maximized window."""
+        """Return whether the button currently reflects a maximized window.
+
+        Returns:
+            True if reflecting a maximized window, False otherwise.
+        """
         return self.__maximized
 
     def set_maximized(self, maximized: bool) -> None:
-        """Update the reflected window state and repaint."""
+        """Update the reflected window state and repaint.
+
+        Args:
+            maximized: Whether the window is currently maximized.
+        """
         if maximized == self.__maximized:
             return
         self.__maximized = maximized
@@ -43,7 +55,11 @@ class MaximizeButton(AbstractButton):
 
     @override
     def paintEvent(self, event: QPaintEvent) -> None:
-        """Override paint event."""
+        """Draw the button's background and maximize/restore glyph.
+
+        Args:
+            event: The Qt paint event.
+        """
         painter: QPainter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         rect: QRectF = self._scaled_rect()

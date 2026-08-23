@@ -25,7 +25,13 @@ _HANDLED_TYPES: frozenset[str] = frozenset(
 
 @dataclass(frozen=True, slots=True)
 class PlaybackMessage:
-    """One playback-relevant message: absolute song time, originating track, raw message."""
+    """One playback-relevant message: absolute song time, originating track, raw message.
+
+    Attributes:
+        time: Absolute song time in seconds this message should fire at.
+        track: Index into midi.tracks this message originated from.
+        message: The raw mido.Message (note_on/note_off/control_change/program_change).
+    """
 
     time: float
     track: int
@@ -44,6 +50,13 @@ def build_playback_messages(midi: mido.MidiFile) -> list[PlaybackMessage]:
     different tracks at the same instant, order falls out as ascending track
     index (an implementation detail, not a documented guarantee - MIDI does
     not define a cross-track tie order for simultaneous events anyway).
+
+    Args:
+        midi: The parsed MIDI file to build a playback stream for.
+
+    Returns:
+        Every note_on/note_off/control_change/program_change message,
+        globally sorted by absolute time.
     """
     tempo_map: list[tuple[int, int]] = build_tempo_map(midi)
     out: list[PlaybackMessage] = []

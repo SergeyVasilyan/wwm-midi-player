@@ -6,7 +6,11 @@ from utils.common import RADIUS_SM, Colors
 
 
 def apply_dialog_theme(dialog: QWidget) -> None:
-    """Apply the app's dark palette to a dialog and its common child widgets."""
+    """Apply the app's dark palette to a dialog and its common child widgets.
+
+    Args:
+        dialog: The dialog widget to style.
+    """
     dialog.setStyleSheet(f"""
         QDialog {{
             background-color: {Colors.BACKGROUND.value.hex};

@@ -33,7 +33,15 @@ class SongDelegate(QStyledItemDelegate):
     """Paints each row's title/artist, now-playing glyph, and animated hover/press/selection."""
 
     def __init__(self, view: QListWidget, accent: Colors, parent: QObject|None=None) -> None:
-        """Initialize the delegate and wire hover/press tracking on view."""
+        """Initialize the delegate and wire hover/press tracking on view.
+
+        Args:
+            view: The list widget this delegate paints rows for; also the
+                source of hover/press mouse tracking.
+            accent: The accent color used for the now-playing glyph and
+                selection bar.
+            parent: Optional parent object.
+        """
         super().__init__(parent=parent)
         self.__view: QListWidget = view
         self.__accent_color: QColor = accent.value.qcolor
@@ -56,13 +64,25 @@ class SongDelegate(QStyledItemDelegate):
         view.viewport().installEventFilter(self)
 
     def set_now_playing_row(self, row: int) -> None:
-        """Mark row as the now-playing track (or -1 for none) and repaint."""
+        """Mark row as the now-playing track (or -1 for none) and repaint.
+
+        Args:
+            row: The now-playing row index, or -1 if nothing is playing.
+        """
         self.__now_playing_row = row
         self.__view.viewport().update()
 
     @override
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:
-        """Reset hover/press state on viewport leave and track press/release."""
+        """Reset hover/press state on viewport leave and track press/release.
+
+        Args:
+            obj: The watched object (the list view's viewport).
+            event: The event being filtered.
+
+        Returns:
+            The base class's handling result.
+        """
         if event.type() == QEvent.Type.Leave:
             self.__hovered_row = -1
             self.__hover.animate_to(0.0)
@@ -76,7 +96,11 @@ class SongDelegate(QStyledItemDelegate):
         return super().eventFilter(obj, event)
 
     def __on_entered(self, index: QModelIndex) -> None:
-        """Snap the previously-hovered row to 0 and animate the newly-hovered row 0->1."""
+        """Snap the previously-hovered row to 0 and animate the newly-hovered row 0->1.
+
+        Args:
+            index: The model index the mouse just entered.
+        """
         if index.row() == self.__hovered_row:
             return
         self.__hovered_row = index.row()
@@ -84,12 +108,25 @@ class SongDelegate(QStyledItemDelegate):
         self.__hover.animate_to(1.0)
 
     def __on_progress_changed(self, _value: float) -> None:
-        """Repaint the viewport as hover/press progress changes."""
+        """Repaint the viewport as hover/press progress changes.
+
+        Args:
+            _value: The animation's current progress (0..1); unused, since
+                painting reads the hover/press values directly.
+        """
         self.__view.viewport().update()
 
     @override
     def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex) -> QSize:
-        """Return a row height that fits both the title and artist lines."""
+        """Return a row height that fits both the title and artist lines.
+
+        Args:
+            option: The style options for the item.
+            index: The model index being sized.
+
+        Returns:
+            The row's preferred size.
+        """
         title_height: int = self.__title_metrics.height()
         artist_height: int = self.__artist_metrics.height()
         block_height: float = title_height + LINE_GAP + artist_height
@@ -98,7 +135,13 @@ class SongDelegate(QStyledItemDelegate):
         return QSize(base.width(), int(row_height))
 
     def __draw_now_playing_glyph(self, painter: QPainter, center_x: float, center_y: float) -> None:
-        """Draw a small solid play-triangle marking the now-playing row."""
+        """Draw a small solid play-triangle marking the now-playing row.
+
+        Args:
+            painter: The active painter to draw with.
+            center_x: The glyph's horizontal center.
+            center_y: The glyph's vertical center.
+        """
         size: float = 5.0
         points: list[QPointF] = [
             QPointF(center_x - size * 0.6, center_y - size),
@@ -112,7 +155,14 @@ class SongDelegate(QStyledItemDelegate):
     @override
     def paint(self, painter: QPainter, option: QStyleOptionViewItem,
                     index: QModelIndex) -> None:
-        """Fully paint the row: background/selection/now-playing tints, glyph, title, artist."""
+        """Fully paint the row: background/selection/now-playing tints, glyph, title, artist.
+
+        Args:
+            painter: The active painter to draw with.
+            option: The style options for the item, including its rect and
+                selection state.
+            index: The model index being painted.
+        """
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         background_rect: QRectF = QRectF(option.rect).adjusted(

@@ -5,7 +5,12 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class TrackInfo:
-    """Artist/title parsed from a track filename."""
+    """Artist/title parsed from a track filename.
+
+    Attributes:
+        artist: The parsed artist name, or "Unknown" if not present.
+        title: The parsed track title.
+    """
 
     artist: str
     title: str
@@ -16,6 +21,12 @@ def parse_track_info(filename: str) -> TrackInfo:
 
     Falls back to artist "Unknown" and the full stem as title when the
     filename doesn't contain a " - " separator.
+
+    Args:
+        filename: The file name (not full path) to parse.
+
+    Returns:
+        The parsed artist/title.
     """
     stem = filename.rsplit(".", 1)[0] if "." in filename else filename
     if " - " in stem:

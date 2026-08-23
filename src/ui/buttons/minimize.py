@@ -17,13 +17,21 @@ class MinimizeButton(AbstractButton):
     """Minimize Button widget for the custom title bar."""
 
     def __init__(self, parent: QWidget|None=None) -> None:
-        """Initialize Minimize Button widget."""
+        """Initialize Minimize Button widget.
+
+        Args:
+            parent: Optional parent widget.
+        """
         super().__init__(parent=parent, size=SIZE)
         self.setToolTip("Minimize")
 
     @override
     def paintEvent(self, event: QPaintEvent) -> None:
-        """Override paint event."""
+        """Draw the button's background and minimize glyph.
+
+        Args:
+            event: The Qt paint event.
+        """
         painter: QPainter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         rect: QRectF = self._scaled_rect()

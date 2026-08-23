@@ -27,7 +27,11 @@ class NowPlayingBar(QFrame):
     seek_requested: Signal = Signal(int)
 
     def __init__(self, parent: QWidget|None=None) -> None:
-        """Initialize NowPlayingBar."""
+        """Initialize NowPlayingBar.
+
+        Args:
+            parent: Optional parent widget.
+        """
         super().__init__(parent=parent)
         self.__title_label: QLabel = QLabel("No files loaded")
         self.__title_label.setStyleSheet(
@@ -61,65 +65,118 @@ class NowPlayingBar(QFrame):
 
     @property
     def play_button(self) -> PlayButton:
-        """Return the play/pause button."""
+        """Return the play/pause button.
+
+        Returns:
+            The play/pause button.
+        """
         return self.__play_button
 
     @property
     def previous_button(self) -> PreviousButton:
-        """Return the previous-track button."""
+        """Return the previous-track button.
+
+        Returns:
+            The previous-track button.
+        """
         return self.__previous_button
 
     @property
     def next_button(self) -> NextButton:
-        """Return the next-track button."""
+        """Return the next-track button.
+
+        Returns:
+            The next-track button.
+        """
         return self.__next_button
 
     @property
     def repeat_button(self) -> RepeatButton:
-        """Return the repeat toggle button."""
+        """Return the repeat toggle button.
+
+        Returns:
+            The repeat toggle button.
+        """
         return self.__repeat_button
 
     @property
     def shuffle_button(self) -> ShuffleButton:
-        """Return the shuffle toggle button."""
+        """Return the shuffle toggle button.
+
+        Returns:
+            The shuffle toggle button.
+        """
         return self.__shuffle_button
 
     @property
     def mode_toggle(self) -> ToggleSwitch:
-        """Return the Audio/WWM mode toggle."""
+        """Return the Audio/WWM mode toggle.
+
+        Returns:
+            The Audio/WWM mode toggle switch.
+        """
         return self.__mode_toggle
 
     @property
     def volume(self) -> Volume:
-        """Return the volume slider."""
+        """Return the volume slider.
+
+        Returns:
+            The volume slider widget.
+        """
         return self.__volume
 
     @staticmethod
     def __convert_to_mm_ss(seconds: int) -> tuple[int, int]:
-        """Convert seconds to humane format MM:SS."""
+        """Convert seconds to humane format MM:SS.
+
+        Args:
+            seconds: Total seconds to convert.
+
+        Returns:
+            A (minutes, seconds) tuple.
+        """
         return divmod(seconds, 60)
 
     @staticmethod
     def __set_elided_text(label: QLabel, text: str) -> None:
-        """Set label's text elided to its fixed width, with the full text as a tooltip."""
+        """Set label's text elided to its fixed width, with the full text as a tooltip.
+
+        Args:
+            label: The label to update.
+            text: The full, unelided text.
+        """
         metrics: QFontMetrics = QFontMetrics(label.font())
         label.setText(metrics.elidedText(text, Qt.TextElideMode.ElideRight, SIDE_COLUMN_WIDTH))
         label.setToolTip(text)
 
     def set_header(self, title: str, artist: str="") -> None:
-        """Set the now-playing header text, eliding long titles/artists."""
+        """Set the now-playing header text, eliding long titles/artists.
+
+        Args:
+            title: The track title to display.
+            artist: The track artist to display; hidden entirely if empty.
+        """
         self.__set_elided_text(self.__title_label, title)
         self.__set_elided_text(self.__artist_label, artist)
         self.__artist_label.setVisible(bool(artist))
 
     def set_duration(self, seconds: int) -> None:
-        """Set the track duration: progress bar max and the combined time label."""
+        """Set the track duration: progress bar max and the combined time label.
+
+        Args:
+            seconds: The track's total duration in seconds.
+        """
         self.__duration_seconds = seconds
         self.__progressbar.setMaximum(seconds)
         self.__update_time_label()
 
     def set_current_time(self, seconds: int) -> None:
-        """Set the current playback position: progress bar value and the combined time label."""
+        """Set the current playback position: progress bar value and the combined time label.
+
+        Args:
+            seconds: The current playback position in seconds.
+        """
         self.__current_seconds = seconds
         self.__progressbar.setValue(seconds)
         self.__update_time_label()
@@ -139,7 +196,11 @@ class NowPlayingBar(QFrame):
             f"{current_minutes}:{current_secs:02d} / {duration_minutes}:{duration_secs:02d}")
 
     def __construct_header(self) -> QVBoxLayout:
-        """Construct the track-info column."""
+        """Construct the track-info column.
+
+        Returns:
+            The assembled track-info column layout.
+        """
         layout: QVBoxLayout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -149,7 +210,11 @@ class NowPlayingBar(QFrame):
         return layout
 
     def __construct_transport_row(self) -> QHBoxLayout:
-        """Construct the centered transport buttons row."""
+        """Construct the centered transport buttons row.
+
+        Returns:
+            The assembled transport buttons row layout.
+        """
         layout: QHBoxLayout = QHBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addStretch()
@@ -162,7 +227,11 @@ class NowPlayingBar(QFrame):
         return layout
 
     def __construct_progress_row(self) -> QHBoxLayout:
-        """Construct the progress bar + combined time label row."""
+        """Construct the progress bar + combined time label row.
+
+        Returns:
+            The assembled progress row layout.
+        """
         layout: QHBoxLayout = QHBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(SPACING_SM)
@@ -171,7 +240,11 @@ class NowPlayingBar(QFrame):
         return layout
 
     def __construct_center_column(self) -> QVBoxLayout:
-        """Construct the transport+progress center column."""
+        """Construct the transport+progress center column.
+
+        Returns:
+            The assembled center column layout.
+        """
         layout: QVBoxLayout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(SPACING_SM)
@@ -181,7 +254,14 @@ class NowPlayingBar(QFrame):
 
     @staticmethod
     def __make_caption_label(text: str) -> QLabel:
-        """Construct a small caption label with readable contrast on the dark panel."""
+        """Construct a small caption label with readable contrast on the dark panel.
+
+        Args:
+            text: The caption text to display.
+
+        Returns:
+            The constructed caption label.
+        """
         label: QLabel = QLabel(text)
         label.setStyleSheet(f"color: {Colors.WHITE.value.hex}; background: transparent;")
         return label
@@ -195,6 +275,9 @@ class NowPlayingBar(QFrame):
         edge - same as before - instead of letting them get pulled toward
         center or, worse, stretched to fill the extra width themselves
         (which would visibly distort the fixed-size mode toggle).
+
+        Returns:
+            The container widget for the volume/mode-toggle column.
         """
         content: QVBoxLayout = QVBoxLayout()
         content.setContentsMargins(0, 0, 0, 0)

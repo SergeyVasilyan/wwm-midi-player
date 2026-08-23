@@ -19,6 +19,13 @@ def _magnifier_pixmap(size: int, color: QColor) -> QPixmap:
     The handle line starts from a point on the lens circle's own boundary
     (derived from its center/radius at a fixed angle) rather than an
     independent hardcoded offset, so it always visually touches the lens.
+
+    Args:
+        size: The pixmap's width and height in pixels.
+        color: The glyph's stroke color.
+
+    Returns:
+        A transparent square pixmap containing the rendered glyph.
     """
     pixmap: QPixmap = QPixmap(size, size)
     pixmap.fill(Qt.GlobalColor.transparent)
@@ -48,7 +55,11 @@ class SearchBox(QLineEdit):
     """Song-search input: pill shape, leading magnifying-glass icon."""
 
     def __init__(self, parent: QWidget|None=None) -> None:
-        """Initialize the search box, placeholder text, and leading icon."""
+        """Initialize the search box, placeholder text, and leading icon.
+
+        Args:
+            parent: Optional parent widget.
+        """
         super().__init__(parent=parent)
         self.setPlaceholderText("Search songs...")
         icon: QIcon = QIcon(_magnifier_pixmap(ICON_SIZE, QColor(Colors.WHITE.value.hex)))

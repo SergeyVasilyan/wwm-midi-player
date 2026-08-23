@@ -30,7 +30,11 @@ class ProgressBar(QProgressBar):
     seek_requested: Signal = Signal(int)
 
     def __init__(self, parent: QWidget|None=None) -> None:
-        """Initialize ProgressBar."""
+        """Initialize ProgressBar.
+
+        Args:
+            parent: Optional parent widget.
+        """
         super().__init__(parent=parent)
         self.setMinimum(0)
         self.setMaximum(100)
@@ -46,11 +50,21 @@ class ProgressBar(QProgressBar):
             easing=QEasingCurve.Type.Linear)
 
     def __on_reveal_changed(self, _value: float) -> None:
-        """Repaint as the thumb-reveal animation progresses."""
+        """Repaint as the thumb-reveal animation progresses.
+
+        Args:
+            _value: The animation's current progress (0..1); unused, since
+                painting reads the reveal value directly.
+        """
         self.update()
 
     def __on_fill_changed(self, _value: float) -> None:
-        """Repaint as the fill animation progresses."""
+        """Repaint as the fill animation progresses.
+
+        Args:
+            _value: The animation's current progress (0..1); unused, since
+                painting reads the fill value directly.
+        """
         self.update()
 
     @override
@@ -59,6 +73,9 @@ class ProgressBar(QProgressBar):
 
         A backward jump (new track, error reset) snaps instantly instead of
         visually rewinding.
+
+        Args:
+            value: The new progress value.
         """
         old_fraction: float = self.__fraction()
         super().setValue(value)
@@ -69,28 +86,51 @@ class ProgressBar(QProgressBar):
             self.__fill.animate_to(new_fraction)
 
     def __track_rect(self) -> QRectF:
-        """Return the visual track rect, vertically centered in the hit area."""
+        """Return the visual track rect, vertically centered in the hit area.
+
+        Returns:
+            The track's bounding rect.
+        """
         return QRectF(0, (self.height() - TRACK_HEIGHT) / 2, self.width(), TRACK_HEIGHT)
 
     def __fraction(self) -> float:
-        """Return current progress as a 0..1 fraction, guarding against a zero-range bar."""
+        """Return current progress as a 0..1 fraction, guarding against a zero-range bar.
+
+        Returns:
+            The current progress as a 0..1 fraction.
+        """
         span: int = self.maximum() - self.minimum()
         return 0.0 if span <= 0 else (self.value() - self.minimum()) / span
 
     def __value_at(self, x: float) -> int:
-        """Return the progress value corresponding to an x coordinate within the bar."""
+        """Return the progress value corresponding to an x coordinate within the bar.
+
+        Args:
+            x: An x coordinate within the bar's local geometry.
+
+        Returns:
+            The corresponding progress value, clamped to [minimum, maximum].
+        """
         fraction: float = 0.0 if self.width() <= 0 else max(0.0, min(1.0, x / self.width()))
         return self.minimum() + round(fraction * (self.maximum() - self.minimum()))
 
     def __seek_to(self, x: float) -> None:
-        """Snap the fill to x and emit seek_requested with the corresponding value."""
+        """Snap the fill to x and emit seek_requested with the corresponding value.
+
+        Args:
+            x: An x coordinate within the bar's local geometry.
+        """
         value: int = self.__value_at(x)
         self.setValue(value)
         self.seek_requested.emit(value)
 
     @override
     def mousePressEvent(self, event: QMouseEvent) -> None:
-        """Seek to the clicked position."""
+        """Seek to the clicked position.
+
+        Args:
+            event: The Qt mouse press event.
+        """
         if event.button() == Qt.MouseButton.LeftButton:
             self.__seek_to(event.position().x())
             return
@@ -98,7 +138,11 @@ class ProgressBar(QProgressBar):
 
     @override
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
-        """Continue seeking while dragging with the left button held."""
+        """Continue seeking while dragging with the left button held.
+
+        Args:
+            event: The Qt mouse move event.
+        """
         if event.buttons() & Qt.MouseButton.LeftButton:
             self.__seek_to(event.position().x())
             return
@@ -106,19 +150,31 @@ class ProgressBar(QProgressBar):
 
     @override
     def enterEvent(self, event: QEnterEvent) -> None:
-        """Reveal the thumb on hover."""
+        """Reveal the thumb on hover.
+
+        Args:
+            event: The Qt enter event.
+        """
         self.__thumb_reveal.animate_to(1.0)
         super().enterEvent(event)
 
     @override
     def leaveEvent(self, event: QEvent) -> None:
-        """Hide the thumb when the mouse leaves."""
+        """Hide the thumb when the mouse leaves.
+
+        Args:
+            event: The Qt leave event.
+        """
         self.__thumb_reveal.animate_to(0.0)
         super().leaveEvent(event)
 
     @override
     def paintEvent(self, _event: QPaintEvent) -> None:
-        """Paint the track, filled portion, and (if hovered) the thumb."""
+        """Paint the track, filled portion, and (if hovered) the thumb.
+
+        Args:
+            _event: The Qt paint event; unused (paints based on internal state).
+        """
         painter: QPainter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         track: QRectF = self.__track_rect()

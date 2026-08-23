@@ -19,7 +19,14 @@ class TitleBar(QWidget):
 
     def __init__(self, window: QMainWindow, title: str, icon: QIcon,
                  parent: QWidget|None=None) -> None:
-        """Initialize the title bar for the given top-level window."""
+        """Initialize the title bar for the given top-level window.
+
+        Args:
+            window: The top-level window this title bar controls.
+            title: The window title text to display.
+            icon: The window icon to display.
+            parent: Optional parent widget.
+        """
         super().__init__(parent=parent)
         self.__window: QMainWindow = window
         self.__normal_geometry: QRect|None = None
@@ -43,7 +50,12 @@ class TitleBar(QWidget):
         self.__wire_buttons(layout)
 
     def __wire_buttons(self, layout: QHBoxLayout) -> None:
-        """Connect the minimize/maximize/close buttons to the window."""
+        """Connect the minimize/maximize/close buttons to the window.
+
+        Args:
+            layout: The layout the buttons were added to, used to look them
+                up by position.
+        """
         minimize_button: MinimizeButton = layout.itemAt(2).widget()
         close_button: CloseButton = layout.itemAt(4).widget()
         minimize_button.clicked.connect(self.__window.showMinimized)
@@ -67,12 +79,20 @@ class TitleBar(QWidget):
             self.__window.showMaximized()
 
     def set_maximized(self, maximized: bool) -> None:
-        """Reflect the window's actual maximized state on the maximize button."""
+        """Reflect the window's actual maximized state on the maximize button.
+
+        Args:
+            maximized: Whether the window is currently maximized.
+        """
         self.__maximize_button.set_maximized(maximized)
 
     @override
     def mousePressEvent(self, event: QMouseEvent) -> None:
-        """Start an OS-native window move via QWindow.startSystemMove()."""
+        """Start an OS-native window move via QWindow.startSystemMove().
+
+        Args:
+            event: The Qt mouse press event.
+        """
         if event.button() == Qt.MouseButton.LeftButton:
             handle = self.__window.windowHandle()
             if handle is not None:
@@ -81,7 +101,11 @@ class TitleBar(QWidget):
 
     @override
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
-        """Toggle maximize on double-click, matching standard OS title-bar behavior."""
+        """Toggle maximize on double-click, matching standard OS title-bar behavior.
+
+        Args:
+            event: The Qt mouse double-click event.
+        """
         if event.button() == Qt.MouseButton.LeftButton:
             self.__toggle_maximize()
         super().mouseDoubleClickEvent(event)

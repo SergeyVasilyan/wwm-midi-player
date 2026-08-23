@@ -31,7 +31,12 @@ class Toast(QFrame):
     dismissed: Signal = Signal()
 
     def __init__(self, message: str, parent: QWidget) -> None:
-        """Initialize Toast, fade it in, and position it in parent's top-right corner."""
+        """Initialize Toast, fade it in, and position it in parent's top-right corner.
+
+        Args:
+            message: The notification text to display.
+            parent: The widget to float above and position relative to.
+        """
         super().__init__(parent=parent)
         self.__is_dismissed: bool = False
         self.setMaximumWidth(MAX_WIDTH)
@@ -71,7 +76,11 @@ class Toast(QFrame):
         self.dismissed.emit()
 
     def __construct_layout(self, message: str) -> None:
-        """Construct Toast layout."""
+        """Construct Toast layout.
+
+        Args:
+            message: The notification text to display.
+        """
         layout: QHBoxLayout = QHBoxLayout(self)
         layout.setContentsMargins(SPACING_MD, SPACING_SM, SPACING_MD, SPACING_SM)
         layout.setSpacing(SPACING_SM)

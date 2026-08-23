@@ -17,13 +17,21 @@ class CloseButton(AbstractButton):
     """Close Button widget for the custom title bar."""
 
     def __init__(self, parent: QWidget|None=None) -> None:
-        """Initialize Close Button widget."""
+        """Initialize Close Button widget.
+
+        Args:
+            parent: Optional parent widget.
+        """
         super().__init__(parent=parent, size=SIZE)
         self.setToolTip("Close")
 
     @override
     def paintEvent(self, event: QPaintEvent) -> None:
-        """Override paint event."""
+        """Draw the button's rounded-square background and "×" glyph.
+
+        Args:
+            event: The Qt paint event.
+        """
         painter: QPainter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         rect: QRectF = self._scaled_rect()

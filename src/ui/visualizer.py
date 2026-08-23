@@ -32,7 +32,11 @@ class PianoVisualizer(QWidget):
     """Draws an 88-key keyboard with falling note bars synced to playback position."""
 
     def __init__(self, parent: QWidget|None=None) -> None:
-        """Initialize PianoVisualizer."""
+        """Initialize PianoVisualizer.
+
+        Args:
+            parent: Optional parent widget.
+        """
         super().__init__(parent=parent)
         self.__events: list[NoteEvent] = []
         self.__starts: list[float] = []
@@ -45,7 +49,12 @@ class PianoVisualizer(QWidget):
         self.setAutoFillBackground(False)
 
     def load_notes(self, events: list[NoteEvent], duration: float) -> None:
-        """Replace the current note set for a newly-loaded track and reset scroll."""
+        """Replace the current note set for a newly-loaded track and reset scroll.
+
+        Args:
+            events: The note events to visualize, pre-sorted by start time.
+            duration: The track's total duration in seconds.
+        """
         self.__events = events
         self.__starts = [event.start for event in events]
         self.__max_note_duration = max((event.end - event.start for event in events), default=0.0)
@@ -54,12 +63,20 @@ class PianoVisualizer(QWidget):
         self.update()
 
     def set_position(self, seconds: float) -> None:
-        """Update the current playback time; triggers a repaint."""
+        """Update the current playback time; triggers a repaint.
+
+        Args:
+            seconds: The current playback position in seconds.
+        """
         self.__position = seconds
         self.update()
 
     def set_muted_tracks(self, tracks: set[int]) -> None:
-        """Hide falling notes/keyboard highlights for the given tracks; repaints immediately."""
+        """Hide falling notes/keyboard highlights for the given tracks; repaints immediately.
+
+        Args:
+            tracks: The indices of tracks to hide.
+        """
         self.__muted_tracks = tracks
         self.update()
 
@@ -101,6 +118,10 @@ class PianoVisualizer(QWidget):
         that started well before the window - but is still sounding - isn't skipped:
         bisecting on window_start alone would cut it off mid-fall as soon as its start
         time fell behind the window.
+
+        Returns:
+            The note events overlapping the current lookahead window, with
+            muted tracks filtered out.
         """
         window_start: float = self.__position - 0.5
         window_end: float = self.__position + LOOKAHEAD_SECONDS
@@ -122,6 +143,10 @@ class PianoVisualizer(QWidget):
         Bars are inset from the full key width so adjacent notes read as
         distinct blocks, and shaded with a vertical gradient that brightens
         toward the keyboard to suggest motion toward the strike line.
+
+        Args:
+            painter: The active painter to draw with.
+            fall_rect: The bounding rect of the falling-notes area.
         """
         pixels_per_second: float = fall_rect.height() / LOOKAHEAD_SECONDS
         for event in self.__visible_events():
@@ -146,7 +171,12 @@ class PianoVisualizer(QWidget):
             painter.drawRoundedRect(bar_rect, radius, radius)
 
     def __sounding_notes(self) -> dict[int, str]:
-        """Return clamped note numbers currently sounding, mapped to their track color."""
+        """Return clamped note numbers currently sounding, mapped to their track color.
+
+        Returns:
+            A mapping of clamped MIDI note number to its track's hex color
+            for every note currently sounding.
+        """
         sounding: dict[int, str] = {}
         for event in self.__visible_events():
             if event.start <= self.__position <= event.end:
@@ -154,7 +184,12 @@ class PianoVisualizer(QWidget):
         return sounding
 
     def __draw_hit_line(self, painter: QPainter, fall_rect: QRectF) -> None:
-        """Draw a thin glowing line marking where falling notes strike the keys."""
+        """Draw a thin glowing line marking where falling notes strike the keys.
+
+        Args:
+            painter: The active painter to draw with.
+            fall_rect: The bounding rect of the falling-notes area.
+        """
         line_rect: QRectF = QRectF(fall_rect.left(), fall_rect.bottom() - HIT_LINE_HEIGHT,
                                     fall_rect.width(), HIT_LINE_HEIGHT)
         # Copy rather than mutate the shared Colors.ACCENT_1 QColor instance in place.
@@ -166,7 +201,14 @@ class PianoVisualizer(QWidget):
 
     def __draw_white_keys(self, painter: QPainter, keyboard_rect: QRectF,
                                 sounding: dict[int, str]) -> None:
-        """Draw the white keys with a subtle top-to-bottom shading for depth."""
+        """Draw the white keys with a subtle top-to-bottom shading for depth.
+
+        Args:
+            painter: The active painter to draw with.
+            keyboard_rect: The bounding rect of the keyboard area.
+            sounding: Mapping of currently-sounding clamped note number to
+                its track's hex color, used to highlight active keys.
+        """
         painter.setPen(QPen(Colors.BACKGROUND.value.qcolor, 1))
         for note in range(MIDI_NOTE_MIN, MIDI_NOTE_MAX + 1):
             if not is_white_key(note):
@@ -186,7 +228,14 @@ class PianoVisualizer(QWidget):
 
     def __draw_black_keys(self, painter: QPainter, keyboard_rect: QRectF,
                                 sounding: dict[int, str]) -> None:
-        """Draw the black keys on top of the white keys, shaded for depth."""
+        """Draw the black keys on top of the white keys, shaded for depth.
+
+        Args:
+            painter: The active painter to draw with.
+            keyboard_rect: The bounding rect of the keyboard area.
+            sounding: Mapping of currently-sounding clamped note number to
+                its track's hex color, used to highlight active keys.
+        """
         black_height: float = keyboard_rect.height() * BLACK_KEY_HEIGHT_RATIO
         painter.setPen(Qt.PenStyle.NoPen)
         for note in range(MIDI_NOTE_MIN, MIDI_NOTE_MAX + 1):
@@ -206,14 +255,23 @@ class PianoVisualizer(QWidget):
             painter.drawRoundedRect(rect, KEY_CORNER_RADIUS, KEY_CORNER_RADIUS)
 
     def __draw_keyboard(self, painter: QPainter, keyboard_rect: QRectF) -> None:
-        """Draw white keys, then black keys on top, highlighting sounding notes."""
+        """Draw white keys, then black keys on top, highlighting sounding notes.
+
+        Args:
+            painter: The active painter to draw with.
+            keyboard_rect: The bounding rect of the keyboard area.
+        """
         sounding: dict[int, str] = self.__sounding_notes()
         self.__draw_white_keys(painter, keyboard_rect, sounding)
         self.__draw_black_keys(painter, keyboard_rect, sounding)
 
     @override
     def paintEvent(self, _event: QPaintEvent) -> None:
-        """Paint the falling-notes area and the piano keyboard."""
+        """Paint the falling-notes area and the piano keyboard.
+
+        Args:
+            _event: The Qt paint event; unused (paints based on internal state).
+        """
         self.__ensure_key_geometry()
         painter: QPainter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)

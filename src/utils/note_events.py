@@ -15,7 +15,18 @@ DRUM_CHANNEL: int = 9  # GM channel 10 (0-indexed) is reserved for percussion.
 
 @dataclass(frozen=True, slots=True)
 class NoteEvent:
-    """A single sounded note: channel, pitch, absolute on/off time, program, track."""
+    """A single sounded note: channel, pitch, absolute on/off time, program, track.
+
+    Attributes:
+        channel: MIDI channel (0-15) the note was sent on.
+        note: MIDI note number.
+        velocity: Note-on velocity (1-127).
+        start: Absolute start time in seconds from the start of the track.
+        end: Absolute end time in seconds; equals start for a zero-length note.
+        program: The channel's active program (instrument) at note-on time.
+        is_drum: Whether the note is on the GM percussion channel.
+        track: Index into midi.tracks this note originated from.
+    """
 
     channel: int
     note: int
@@ -29,7 +40,14 @@ class NoteEvent:
 
 @dataclass(frozen=True, slots=True)
 class TrackSummary:
-    """A track eligible for the mute UI: its midi.tracks index, display name, and swatch flavor."""
+    """A track eligible for the mute UI: its midi.tracks index, display name, and swatch flavor.
+
+    Attributes:
+        index: Index into midi.tracks.
+        name: Display name for the track (from its track_name meta message,
+            or a "Track N" fallback).
+        is_drum: Whether the track emitted at least one drum-channel note.
+    """
 
     index: int
     name: str
@@ -49,6 +67,12 @@ def build_note_events(midi: mido.MidiFile) -> list[NoteEvent]:
     would lose that track identity entirely. Notes still open at EOF are
     closed at their own start time (a zero-length bar) instead of being
     dropped.
+
+    Args:
+        midi: The parsed MIDI file to precompute note events for.
+
+    Returns:
+        Every note event in the file, sorted by start time.
     """
     tempo_map: list[tuple[int, int]] = build_tempo_map(midi)
     open_notes: dict[tuple[int, int, int], tuple[float, int, int]] = {}
@@ -86,6 +110,12 @@ def extract_track_names(midi: mido.MidiFile) -> list[str]:
     Reads each track's first MetaMessage("track_name"); a track with none
     (or a blank/whitespace-only one) falls back to "Track {index + 1}"
     (1-based, matching how DAWs number tracks for end users).
+
+    Args:
+        midi: The parsed MIDI file to read track names from.
+
+    Returns:
+        One display name per midi.tracks entry, in the same order.
     """
     names: list[str] = []
     for index, track in enumerate(midi.tracks):
@@ -108,6 +138,14 @@ def summarize_tracks(midi: mido.MidiFile, events: list[NoteEvent]) -> list[Track
     drum-channel note, used only for the panel's swatch color - the falling
     notes themselves are still colored per-event via NoteEvent.is_drum,
     unaffected by this simplification.
+
+    Args:
+        midi: The parsed MIDI file (used to read track names).
+        events: Note events already precomputed via build_note_events().
+
+    Returns:
+        One TrackSummary per track that produced at least one note event,
+        in ascending track-index order.
     """
     names: list[str] = extract_track_names(midi)
     used_tracks: set[int] = {event.track for event in events}

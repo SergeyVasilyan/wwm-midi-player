@@ -27,7 +27,12 @@ class _TrackRow(QWidget):
     solo_toggled: Signal = Signal(int, bool)
 
     def __init__(self, track: TrackSummary, parent: QWidget|None=None) -> None:
-        """Initialize a row for one track, defaulting to unmuted/not-soloed."""
+        """Initialize a row for one track, defaulting to unmuted/not-soloed.
+
+        Args:
+            track: The track this row represents.
+            parent: Optional parent widget.
+        """
         super().__init__(parent=parent)
         self.__index: int = track.index
         swatch: QLabel = QLabel()
@@ -72,11 +77,19 @@ class _TrackRow(QWidget):
         layout.addWidget(self.__switch)
 
     def set_muted(self, muted: bool) -> None:
-        """Reflect external mute state (e.g. from a solo elsewhere) without emitting toggled."""
+        """Reflect external mute state (e.g. from a solo elsewhere) without emitting toggled.
+
+        Args:
+            muted: Whether the row's track should show as muted.
+        """
         self.__switch.setChecked(not muted)
 
     def set_soloed(self, soloed: bool) -> None:
-        """Reflect which row (if any) is currently soloed, without emitting solo_toggled."""
+        """Reflect which row (if any) is currently soloed, without emitting solo_toggled.
+
+        Args:
+            soloed: Whether this row's track should show as soloed.
+        """
         self.__solo_button.setChecked(soloed)
 
 
@@ -87,7 +100,11 @@ class TrackListPanel(QFrame):
     track_soloed: Signal = Signal(int, bool)
 
     def __init__(self, parent: QWidget|None=None) -> None:
-        """Initialize TrackListPanel."""
+        """Initialize TrackListPanel.
+
+        Args:
+            parent: Optional parent widget.
+        """
         super().__init__(parent=parent)
         self.__rows: dict[int, _TrackRow] = {}
         self.__widget: QListWidget = QListWidget(self)
@@ -99,7 +116,11 @@ class TrackListPanel(QFrame):
         self.__set_style()
 
     def load_tracks(self, tracks: list[TrackSummary]) -> None:
-        """Clear and rebuild one row per track, in ascending track-index order."""
+        """Clear and rebuild one row per track, in ascending track-index order.
+
+        Args:
+            tracks: The tracks to display, one row each.
+        """
         self.clear()
         for track in tracks:
             row: _TrackRow = _TrackRow(track)
@@ -112,12 +133,21 @@ class TrackListPanel(QFrame):
             self.__widget.setItemWidget(item, row)
 
     def set_muted_tracks(self, tracks: set[int]) -> None:
-        """Sync every row's mute switch to the given muted-track set."""
+        """Sync every row's mute switch to the given muted-track set.
+
+        Args:
+            tracks: The indices of tracks that should show as muted.
+        """
         for index, row in self.__rows.items():
             row.set_muted(index in tracks)
 
     def set_soloed_track(self, track: int|None) -> None:
-        """Sync every row's solo button so only track (if any) shows as soloed."""
+        """Sync every row's solo button so only track (if any) shows as soloed.
+
+        Args:
+            track: The index of the currently soloed track, or None if no
+                track is soloed.
+        """
         for index, row in self.__rows.items():
             row.set_soloed(index == track)
 

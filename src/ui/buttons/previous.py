@@ -15,12 +15,20 @@ class PreviousButton(AbstractButton):
     """Previous Button widget."""
 
     def __init__(self, parent: QWidget|None=None) -> None:
-        """Initialize Previous Button widget."""
+        """Initialize Previous Button widget.
+
+        Args:
+            parent: Optional parent widget.
+        """
         super().__init__(parent=parent)
 
     @override
     def paintEvent(self, event: QPaintEvent) -> None:
-        """Override paint event."""
+        """Draw the button's circular background and "previous track" glyph.
+
+        Args:
+            event: The Qt paint event.
+        """
         painter: QPainter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         circle: QRectF = self._scaled_rect()

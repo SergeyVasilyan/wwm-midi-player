@@ -25,7 +25,11 @@ class ToggleSwitch(QAbstractButton):
     __position_changed: Signal = Signal(float)
 
     def __init__(self, parent: QWidget|None=None) -> None:
-        """Initialize toggle."""
+        """Initialize toggle.
+
+        Args:
+            parent: Optional parent widget.
+        """
         super().__init__(parent=parent)
         self.setCheckable(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -50,12 +54,20 @@ class ToggleSwitch(QAbstractButton):
 
     @Property(float, notify=__position_changed)
     def position(self) -> float:
-        """Return current position."""
+        """Return current position.
+
+        Returns:
+            The knob's current x-offset within the track.
+        """
         return self.__position
 
     @position.setter
     def position(self, value: float) -> None:
-        """Update position."""
+        """Update the knob's x-offset, clamped to the track, and repaint.
+
+        Args:
+            value: The knob's new, unclamped x-offset.
+        """
         value = max(self.__offset, min(self.__width - self.__knob_size - self.__offset, value))
         if value == self.__position:
             return
@@ -65,17 +77,32 @@ class ToggleSwitch(QAbstractButton):
 
     @override
     def sizeHint(self) -> QSize:
-        """Override size hint."""
+        """Return the switch's preferred size.
+
+        Returns:
+            The fixed track width and height.
+        """
         return QSize(self.__width, self.__height)
 
     @override
     def hitButton(self, pos: QPoint, /) -> bool:
-        """Override hitButton."""
+        """Return whether pos is within the clickable track area.
+
+        Args:
+            pos: The position to test, in widget coordinates.
+
+        Returns:
+            True if pos falls inside the track.
+        """
         return self.rect().contains(pos)
 
     @override
     def paintEvent(self, _event: QPaintEvent) -> None:
-        """Override paint event."""
+        """Draw the track and knob at their current checked state/position.
+
+        Args:
+            _event: The Qt paint event; unused (paints based on internal state).
+        """
         painter: QPainter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         track_rect: QRect = QRect(0, 0, self.width(), self.height())
@@ -91,7 +118,7 @@ class ToggleSwitch(QAbstractButton):
 
     @Slot()
     def __start_animation(self, /) -> None:
-        """Start animation.."""
+        """Animate the knob to the on/off stop matching the current checked state."""
         self.__animation.stop()
         self.__animation.setStartValue(self.__position)
         if self.isChecked():

@@ -15,12 +15,20 @@ class NextButton(AbstractButton):
     """Next Button widget."""
 
     def __init__(self, parent: QWidget|None=None) -> None:
-        """Initialize Next Button widget."""
+        """Initialize Next Button widget.
+
+        Args:
+            parent: Optional parent widget.
+        """
         super().__init__(parent=parent)
 
     @override
     def paintEvent(self, event: QPaintEvent) -> None:
-        """Override paint event."""
+        """Draw the button's circular background and "next track" glyph.
+
+        Args:
+            event: The Qt paint event.
+        """
         painter: QPainter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         circle: QRectF = self._scaled_rect()

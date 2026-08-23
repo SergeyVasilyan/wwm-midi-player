@@ -25,7 +25,11 @@ class KeyConfigurator(QDialog):
     """Key Configurator Dialog."""
 
     def __init__(self, parent: QWidget|None=None) -> None:
-        """Initialize Key Configurator."""
+        """Initialize Key Configurator.
+
+        Args:
+            parent: Optional parent widget.
+        """
         super().__init__(parent)
         self.setWindowTitle("Key Configurator")
         self.setModal(True)
@@ -36,14 +40,18 @@ class KeyConfigurator(QDialog):
 
     @Slot()
     def __reset_on_click(self) -> None:
-        """Reset button click callback."""
+        """Restore every key button's label and the saved bindings to defaults."""
         default_bindings: dict[str, Any] = self.__manager.default_bindings
         for button in self.__buttons:
             button.setText(default_bindings[button.octave][button.note])
         self.__manager.reset_keybindings()
 
     def __key_button_on_click(self, button: KeyButton) -> None:
-        """Key button click callback."""
+        """Open KeyCatcher to rebind a note and persist the chosen key.
+
+        Args:
+            button: The key button that was clicked.
+        """
         forbidden_keys: list[str] = [button.text() for button in self.__buttons]
         forbidden_keys.remove(button.text())
         dialog: KeyCatcher = KeyCatcher(forbidden_keys, parent=self)
@@ -55,14 +63,29 @@ class KeyConfigurator(QDialog):
         self.__manager.update_keybinding(button.octave, button.note, pressed_key)
 
     def __construct_key_button(self, layout: QHBoxLayout, octave: str, note: str, key: str) -> None:
-        """Construct key button."""
+        """Create one KeyButton, track it, and add it to layout.
+
+        Args:
+            layout: The row layout to add the button to.
+            octave: The register this key belongs to ("low", "med", "high").
+            note: The scale degree this key is bound to (e.g. "1", "#4").
+            key: The currently bound key label to display.
+        """
         button: KeyButton = KeyButton(key, octave=octave, note=note)
         button.clicked.connect(lambda: self.__key_button_on_click(button))
         self.__buttons.append(button)
         layout.addWidget(button)
 
     def __construct_key_binding_section(self, layout: QGridLayout, row: int) -> int:
-        """Construct key binding configuration section."""
+        """Add one grouped row of key buttons per octave register.
+
+        Args:
+            layout: The grid layout to add rows to.
+            row: The next free row index in layout.
+
+        Returns:
+            The next free row index after the added rows.
+        """
         for octave, notes in self.__manager.bindings.items():
             group: QGroupBox = QGroupBox(f"{octave.title()} Octave")
             group.setStyleSheet(f"""
@@ -91,7 +114,7 @@ class KeyConfigurator(QDialog):
         return row + 1
 
     def __create_layout(self) -> None:
-        """Create Dialog layout."""
+        """Create the dialog's full layout."""
         layout: QGridLayout = QGridLayout()
         row: int = 0
         header: QLabel = QLabel("Customize which keys play each note. Click a key to change it.")

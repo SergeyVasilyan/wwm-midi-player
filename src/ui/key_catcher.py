@@ -14,7 +14,14 @@ class KeyCatcher(QDialog):
     """Key Catcher dialog."""
 
     def __init__(self, forbidden_keys: list[str], parent: QWidget|None=None) -> None:
-        """Initialize Key Catcher."""
+        """Initialize Key Catcher.
+
+        Args:
+            forbidden_keys: Keys already bound to another note; pressing one
+                of these disables Save and shows a conflict warning instead
+                of accepting it.
+            parent: Optional parent widget.
+        """
         super().__init__(parent)
         self.setWindowTitle("Key Catcher")
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -28,17 +35,30 @@ class KeyCatcher(QDialog):
 
     @property
     def key(self) -> str:
-        """Return pressed key."""
+        """Return pressed key.
+
+        Returns:
+            The saved key, or an empty string if the dialog was closed
+            without pressing Save.
+        """
         return self.__pressed_key
 
     @Slot()
     def __save_on_click(self) -> None:
-        """Save button click callback."""
+        """Commit the currently displayed key and close the dialog."""
         self.__pressed_key = self.__label.text()
         self.close()
 
     def __construct_hint_section(self, layout: QGridLayout, row: int) -> int:
-        """Construct hint section."""
+        """Add the allowed-keys hint, pressed-key display, and conflict warning.
+
+        Args:
+            layout: The grid layout to add rows to.
+            row: The next free row index in layout.
+
+        Returns:
+            The next free row index after the added rows.
+        """
         layout.addWidget(QLabel("Allowed keys A-Z, and 0-9"), row, 0, 1, -1,
                         alignment=Qt.AlignmentFlag.AlignCenter)
         row += 1
@@ -54,7 +74,15 @@ class KeyCatcher(QDialog):
         return row + 1
 
     def __construct_buttons_section(self, layout: QGridLayout, row: int) -> int:
-        """Construct buttons section."""
+        """Add the centered Save button row.
+
+        Args:
+            layout: The grid layout to add the row to.
+            row: The next free row index in layout.
+
+        Returns:
+            The next free row index after the added row.
+        """
         self.__save_button = QPushButton("Save")
         self.__save_button.setDisabled(True)
         self.__save_button.clicked.connect(self.__save_on_click)
@@ -67,7 +95,7 @@ class KeyCatcher(QDialog):
         return row + 1
 
     def __construct_layout(self) -> None:
-        """Construct layout."""
+        """Construct the dialog's full layout."""
         layout: QGridLayout = QGridLayout()
         row: int = 0
         row = self.__construct_hint_section(layout, row)
@@ -76,7 +104,11 @@ class KeyCatcher(QDialog):
 
     @override
     def keyPressEvent(self, event: QKeyEvent) -> None:
-        """Override key press event."""
+        """Display the pressed key and validate it against forbidden keys.
+
+        Args:
+            event: The Qt key press event.
+        """
         pressed_key: str = event.text().upper()
         if re.match(r"^[A-Z0-9]$", pressed_key):
             self.__label.setText(pressed_key)
