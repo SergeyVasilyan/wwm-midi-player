@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 from ui.buttons.key import KeyButton
 from ui.dialog_style import apply_dialog_theme
 from ui.key_catcher import KeyCatcher
-from utils.common import Colors
+from utils.common import Colors, theme_bus
 from utils.wwm_macro import KeyManager
 
 
@@ -34,6 +34,7 @@ class KeyConfigurator(QDialog):
         self.setWindowTitle("Key Configurator")
         self.setModal(True)
         apply_dialog_theme(self)
+        theme_bus.changed.connect(lambda: apply_dialog_theme(self))
         self.__manager: KeyManager = KeyManager()
         self.__buttons: list[KeyButton] = []
         self.__create_layout()

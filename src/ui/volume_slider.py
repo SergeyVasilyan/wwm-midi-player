@@ -3,7 +3,7 @@
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QSlider, QWidget
 
-from utils.common import Colors
+from utils.common import Colors, theme_bus
 
 
 class Volume(QSlider):
@@ -20,6 +20,7 @@ class Volume(QSlider):
         self.setRange(0, 127)
         self.setValue(100)
         self.set_style()
+        theme_bus.changed.connect(self.set_style)
 
     def set_style(self) -> None:
         """Apply the gradient-filled track and handle styling."""

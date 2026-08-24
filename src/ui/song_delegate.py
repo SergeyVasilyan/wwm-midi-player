@@ -7,7 +7,7 @@ from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPolygonF
 from PySide6.QtWidgets import QListWidget, QStyle, QStyledItemDelegate, QStyleOptionViewItem
 
 from ui.animation import AnimatedProgress
-from utils.common import Colors
+from utils.common import Colors, theme_bus
 
 TITLE_ROLE: int = Qt.ItemDataRole.UserRole + 1
 ARTIST_ROLE: int = Qt.ItemDataRole.UserRole + 2
@@ -26,7 +26,6 @@ LINE_GAP = 2.0
 SELECTION_GUTTER_WIDTH = 8.0
 PLAY_GUTTER_WIDTH = 20.0
 TEXT_PADDING = 8.0
-SUBDUED_TEXT_COLOR = QColor("#999999")
 
 
 class SongDelegate(QStyledItemDelegate):
@@ -62,6 +61,7 @@ class SongDelegate(QStyledItemDelegate):
         view.viewport().setMouseTracking(True)
         view.entered.connect(self.__on_entered)
         view.viewport().installEventFilter(self)
+        theme_bus.changed.connect(view.viewport().update)
 
     def set_now_playing_row(self, row: int) -> None:
         """Mark row as the now-playing track (or -1 for none) and repaint.
@@ -210,7 +210,7 @@ class SongDelegate(QStyledItemDelegate):
         painter.setPen(self.__accent_color if is_now_playing else Colors.WHITE.value.qcolor)
         painter.drawText(title_rect, int(Qt.AlignmentFlag.AlignVCenter), title_text)
         painter.setFont(self.__artist_font)
-        painter.setPen(SUBDUED_TEXT_COLOR)
+        painter.setPen(Colors.TEXT_MUTED.value.qcolor)
         painter.drawText(artist_rect, int(Qt.AlignmentFlag.AlignVCenter), artist_text)
         painter.restore()
 

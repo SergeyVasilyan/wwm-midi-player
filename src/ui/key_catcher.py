@@ -8,6 +8,7 @@ from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import QDialog, QGridLayout, QHBoxLayout, QLabel, QPushButton, QWidget
 
 from ui.dialog_style import apply_dialog_theme
+from utils.common import theme_bus
 
 
 class KeyCatcher(QDialog):
@@ -26,6 +27,7 @@ class KeyCatcher(QDialog):
         self.setWindowTitle("Key Catcher")
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         apply_dialog_theme(self)
+        theme_bus.changed.connect(lambda: apply_dialog_theme(self))
         self.__pressed_key: str = ""
         self.__label: QLabel
         self.__error_label: QLabel

@@ -7,7 +7,7 @@ from PySide6.QtGui import QColor, QEnterEvent, QMouseEvent
 from PySide6.QtWidgets import QPushButton, QWidget
 
 from ui.animation import AnimatedProgress
-from utils.common import Colors
+from utils.common import Colors, theme_bus
 
 DEFAULT_SIZE = QSize(36, 36)
 HOVER_ANIMATION_DURATION_MS = 150
@@ -42,6 +42,7 @@ class AbstractButton(QPushButton):
         self.__press: AnimatedProgress = AnimatedProgress(
             self, self.__on_progress_changed, PRESS_ANIMATION_DURATION_MS)
         self.set_style()
+        theme_bus.changed.connect(self.update)
 
     def _hover_progress(self) -> float:
         """Return the current hover animation progress (0..1).

@@ -25,12 +25,14 @@ class AppSettings:
         playlist: File paths of the last-loaded playlist.
         current_index: Index into playlist of the last-selected track, or
             -1 if none was selected.
+        theme: Active color theme, "dark" or "light".
     """
 
     volume: int = DEFAULT_VOLUME
     is_audio_mode: bool = False
     playlist: list[str] = field(default_factory=list)
     current_index: int = -1
+    theme: str = "dark"
 
 
 def load_settings(path: Path = SETTINGS_PATH) -> AppSettings:
@@ -48,7 +50,8 @@ def load_settings(path: Path = SETTINGS_PATH) -> AppSettings:
     try:
         with path.open(encoding="utf-8") as f:
             data: dict = json.load(f)
-        known_fields: set[str] = {"volume", "is_audio_mode", "playlist", "current_index"}
+        known_fields: set[str] = {
+            "volume", "is_audio_mode", "playlist", "current_index", "theme"}
         return AppSettings(**{key: value for key, value in data.items() if key in known_fields})
     except (OSError, json.JSONDecodeError, TypeError):
         return AppSettings()

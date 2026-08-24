@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
 )
 
 from ui.animation import AnimatedProgress
-from utils.common import RADIUS_MD, SPACING_MD, SPACING_SM, Colors
+from utils.common import RADIUS_MD, SPACING_MD, SPACING_SM, Colors, theme_bus
 
 DISMISS_AFTER_MS = 5_000
 FADE_DURATION_MS = 200
@@ -42,6 +42,8 @@ class Toast(QFrame):
         self.setMaximumWidth(MAX_WIDTH)
         self.__construct_layout(message)
         self.__set_style()
+        theme_bus.changed.connect(self.__set_style)
+        theme_bus.changed.connect(self.__style_children)
         opacity: QGraphicsOpacityEffect = QGraphicsOpacityEffect(self)
         opacity.setOpacity(0.0)
         self.setGraphicsEffect(opacity)
@@ -87,26 +89,35 @@ class Toast(QFrame):
         # "!" (plain ASCII) rather than a Unicode warning-sign glyph, which
         # isn't covered by every font and can render as a garbled fallback
         # glyph instead of an icon.
-        icon: QLabel = QLabel("!")
-        icon.setFixedSize(20, 20)
-        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon.setStyleSheet(f"""
+        self.__icon: QLabel = QLabel("!")
+        self.__icon.setFixedSize(20, 20)
+        self.__icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.__message_label: QLabel = QLabel(message)
+        self.__message_label.setWordWrap(True)
+        self.__close_button: QPushButton = QPushButton("×")
+        self.__close_button.setFixedSize(20, 20)
+        self.__close_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.__style_children()
+        self.__close_button.clicked.connect(self.__request_dismiss)
+        layout.addWidget(self.__icon, stretch=0)
+        layout.addWidget(self.__message_label, stretch=1)
+        layout.addWidget(self.__close_button, stretch=0)
+
+    def __style_children(self) -> None:
+        """Apply theme-dependent colors to the icon badge, message, and close button."""
+        self.__icon.setStyleSheet(f"""
             background-color: {Colors.RED.value.hex};
             color: {Colors.WHITE.value.hex};
             font-weight: bold;
             border-radius: 10px;
         """)
-        label: QLabel = QLabel(message)
-        label.setWordWrap(True)
-        label.setStyleSheet(f"color: {Colors.WHITE.value.hex}; background: transparent;")
-        close_button: QPushButton = QPushButton("×")
-        close_button.setFixedSize(20, 20)
-        close_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        close_button.setStyleSheet(f"""
+        self.__message_label.setStyleSheet(
+            f"color: {Colors.WHITE.value.hex}; background: transparent;")
+        self.__close_button.setStyleSheet(f"""
             QPushButton {{
                 background: none;
                 border: none;
-                color: #999999;
+                color: {Colors.TEXT_MUTED.value.hex};
                 font-weight: bold;
                 font-size: 14px;
                 border-radius: 10px;
@@ -119,10 +130,6 @@ class Toast(QFrame):
                 background-color: {Colors.ACCENT_1.value.hex};
             }}
         """)
-        close_button.clicked.connect(self.__request_dismiss)
-        layout.addWidget(icon, stretch=0)
-        layout.addWidget(label, stretch=1)
-        layout.addWidget(close_button, stretch=0)
 
     def __set_style(self) -> None:
         """Apply the exact same card chrome as Viewer/TrackListPanel/dialogs.

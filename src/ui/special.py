@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
 )
 
 from ui.dialog_style import apply_dialog_theme
+from utils.common import theme_bus
 
 
 class SpecialDialog(QDialog):
@@ -28,6 +29,7 @@ class SpecialDialog(QDialog):
         self.setWindowTitle("Special")
         self.setModal(True)
         apply_dialog_theme(self)
+        theme_bus.changed.connect(lambda: apply_dialog_theme(self))
         self.__create_layout()
 
     def __create_layout(self) -> None:

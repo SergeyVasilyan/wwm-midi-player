@@ -55,7 +55,10 @@ from utils.common import (
     SPACING_MD,
     SPACING_XS,
     Colors,
+    apply_theme,
+    current_theme,
     resource_path,
+    theme_bus,
 )
 from utils.midi_timing import calculate_duration
 from utils.note_events import (
@@ -409,6 +412,7 @@ class Player(QMainWindow):
         self.__now_playing_bar: NowPlayingBar
         self.__repeat_action: QAction
         self.__shuffle_action: QAction
+        self.__root: QWidget
         self.__central_layout: QVBoxLayout
         self.__content_widget: QWidget
         self.__title_bar: TitleBar
@@ -426,7 +430,21 @@ class Player(QMainWindow):
         self.__construct_layout()
         self.__wire_now_playing_bar()
         self.__bind_shortcuts()
+        theme_bus.changed.connect(self.__on_theme_changed)
         self.__load_saved_settings()
+
+    @Slot()
+    def __on_theme_changed(self) -> None:
+        """Re-apply the QSS this class owns directly after a theme switch.
+
+        Every child widget restyles itself independently via its own
+        `theme_bus.changed` connection - this only covers the menu bar,
+        Songs/Tracks tab buttons, and root/content backgrounds, which
+        `Player` builds and styles inline.
+        """
+        self.__style_menu_bar()
+        self.__style_tab_buttons()
+        self.__style_root()
 
     def __bind_shortcuts(self) -> None:
         """Bind shortcuts.
@@ -453,6 +471,7 @@ class Player(QMainWindow):
         nothing is actually playing yet at startup.
         """
         settings: AppSettings = load_settings()
+        apply_theme(settings.theme)
         self.__now_playing_bar.volume.setValue(settings.volume)
         self.__now_playing_bar.mode_toggle.setChecked(settings.is_audio_mode)
         self.__files = [f for f in settings.playlist if Path(f).exists()]
@@ -466,12 +485,13 @@ class Player(QMainWindow):
         self.__now_playing_bar.set_header(info.title, info.artist)
 
     def __save_settings_to_disk(self) -> None:
-        """Persist volume, Audio/WWM mode, and the current playlist/selection."""
+        """Persist volume, Audio/WWM mode, theme, and the current playlist/selection."""
         save_settings(AppSettings(
             volume=self.__now_playing_bar.volume.value(),
             is_audio_mode=self.__now_playing_bar.mode_toggle.isChecked(),
             playlist=list(self.__files),
             current_index=self.__current_index,
+            theme=current_theme(),
         ))
 
     @Slot(str)
@@ -998,6 +1018,10 @@ class Player(QMainWindow):
         self.__construct_setting_menu()
         self.__construct_help_menu()
         self.__construct_special_menu()
+        self.__style_menu_bar()
+
+    def __style_menu_bar(self) -> None:
+        """Apply theme-dependent colors to the menu bar and its dropdown menus."""
         self.__menu_bar.setStyleSheet(f"""
             QMenuBar {{
                 background-color: {Colors.BACKGROUND.value.hex};
@@ -1073,7 +1097,27 @@ class Player(QMainWindow):
         return self.__track_list_panel
 
     @staticmethod
-    def __make_tab_button(text: str) -> QPushButton:
+    def __tab_button_qss() -> str:
+        """Return the checkable tab-button QSS, current as of the active theme.
+
+        Returns:
+            The QSS block for a Songs/Tracks tab-style button.
+        """
+        return f"""
+            QPushButton {{
+                background: transparent;
+                color: {Colors.TEXT_MUTED.value.hex};
+                border: none;
+                border-bottom: 2px solid transparent;
+                padding: 4px 2px;
+            }}
+            QPushButton:checked {{
+                color: {Colors.WHITE.value.hex};
+                border-bottom: 2px solid {Colors.ACCENT_1.value.hex};
+            }}
+        """
+
+    def __make_tab_button(self, text: str) -> QPushButton:
         """Construct a checkable tab-style button for the Songs/Tracks switch.
 
         Args:
@@ -1085,20 +1129,14 @@ class Player(QMainWindow):
         button: QPushButton = QPushButton(text)
         button.setCheckable(True)
         button.setCursor(Qt.CursorShape.PointingHandCursor)
-        button.setStyleSheet(f"""
-            QPushButton {{
-                background: transparent;
-                color: #999999;
-                border: none;
-                border-bottom: 2px solid transparent;
-                padding: 4px 2px;
-            }}
-            QPushButton:checked {{
-                color: {Colors.WHITE.value.hex};
-                border-bottom: 2px solid {Colors.ACCENT_1.value.hex};
-            }}
-        """)
+        button.setStyleSheet(self.__tab_button_qss())
         return button
+
+    def __style_tab_buttons(self) -> None:
+        """Re-apply the tab-button QSS to the Songs/Tracks buttons after a theme switch."""
+        qss: str = self.__tab_button_qss()
+        for button in self.__playlist_tab_group.buttons():
+            button.setStyleSheet(qss)
 
     def __construct_tab_row(self) -> QHBoxLayout:
         """Construct the Songs/Tracks tab switch driving self.__stacked_playlist.
@@ -1152,11 +1190,24 @@ class Player(QMainWindow):
         layout.addWidget(self.__visualizer, stretch=2)
         return layout
 
+    def __style_root(self) -> None:
+        """Apply the base window background to the otherwise-unstyled root/content widgets.
+
+        Both are plain QWidgets (not QFrame), so WA_StyledBackground is
+        required for their background-color QSS to paint at all - without
+        it, these regions (window margins, gaps between panels) would keep
+        showing Qt's default palette instead of following the app's theme.
+        """
+        style: str = f"background-color: {Colors.BACKGROUND.value.hex};"
+        self.__root.setStyleSheet(style)
+        self.__content_widget.setStyleSheet(style)
+
     def __construct_layout(self) -> None:
         """Construct layout."""
-        root: QWidget = QWidget()
-        self.setCentralWidget(root)
-        root_layout: QVBoxLayout = QVBoxLayout(root)
+        self.__root: QWidget = QWidget()
+        self.__root.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setCentralWidget(self.__root)
+        root_layout: QVBoxLayout = QVBoxLayout(self.__root)
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(0)
         icon: QIcon = QIcon(resource_path("src/input/logo.ico").as_posix())
@@ -1164,6 +1215,7 @@ class Player(QMainWindow):
         root_layout.addWidget(self.__title_bar)
         root_layout.addWidget(self.__menu_bar)
         self.__content_widget = QWidget()
+        self.__content_widget.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.__central_layout = QVBoxLayout(self.__content_widget)
         self.__central_layout.setContentsMargins(SPACING_MD, SPACING_MD, SPACING_MD, SPACING_MD)
         self.__central_layout.setSpacing(SPACING_MD)
@@ -1177,6 +1229,7 @@ class Player(QMainWindow):
         self.__visualizer_timer.timeout.connect(self.__update_visualizer_position)
         self.__now_playing_bar = NowPlayingBar()
         root_layout.addWidget(self.__now_playing_bar)
+        self.__style_root()
 
     def __cursor_for_edges(self, edges: Qt.Edge) -> Qt.CursorShape:
         """Map a resize-edge combination to the appropriate resize cursor shape.

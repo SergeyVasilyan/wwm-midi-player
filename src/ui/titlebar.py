@@ -9,7 +9,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QMainWindow, QWidget
 from ui.buttons.close import CloseButton
 from ui.buttons.maximize import MaximizeButton
 from ui.buttons.minimize import MinimizeButton
-from utils.common import SPACING_XS, TITLEBAR_HEIGHT, Colors
+from utils.common import SPACING_XS, TITLEBAR_HEIGHT, Colors, theme_bus
 
 ICON_SIZE = QSize(16, 16)
 
@@ -31,23 +31,32 @@ class TitleBar(QWidget):
         self.__window: QMainWindow = window
         self.__normal_geometry: QRect|None = None
         self.setFixedHeight(TITLEBAR_HEIGHT)
-        self.setStyleSheet(f"background-color: {Colors.BACKGROUND.value.hex};")
+        # Plain QWidget subclasses (unlike QFrame) don't paint a QSS
+        # background-color at all unless this attribute is set - without it,
+        # re-styling on a theme switch would silently no-op.
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         layout: QHBoxLayout = QHBoxLayout(self)
         layout.setContentsMargins(SPACING_XS * 2, 0, SPACING_XS, 0)
         layout.setSpacing(SPACING_XS)
         icon_label: QLabel = QLabel()
         icon_label.setPixmap(icon.pixmap(ICON_SIZE))
         icon_label.setStyleSheet("background: transparent;")
-        title_label: QLabel = QLabel(title)
-        title_label.setStyleSheet(
-            f"color: {Colors.WHITE.value.hex}; font-weight: bold; background: transparent;")
+        self.__title_label: QLabel = QLabel(title)
         self.__maximize_button: MaximizeButton = MaximizeButton()
         layout.addWidget(icon_label)
-        layout.addWidget(title_label, stretch=1)
+        layout.addWidget(self.__title_label, stretch=1)
         layout.addWidget(MinimizeButton())
         layout.addWidget(self.__maximize_button)
         layout.addWidget(CloseButton())
         self.__wire_buttons(layout)
+        self.__style()
+        theme_bus.changed.connect(self.__style)
+
+    def __style(self) -> None:
+        """Apply theme-dependent colors to the bar background and title text."""
+        self.setStyleSheet(f"background-color: {Colors.BACKGROUND.value.hex};")
+        self.__title_label.setStyleSheet(
+            f"color: {Colors.WHITE.value.hex}; font-weight: bold; background: transparent;")
 
     def __wire_buttons(self, layout: QHBoxLayout) -> None:
         """Connect the minimize/maximize/close buttons to the window.

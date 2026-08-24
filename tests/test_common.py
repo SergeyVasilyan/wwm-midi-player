@@ -1,10 +1,18 @@
-"""Tests for shared resource-path resolution."""
+"""Tests for shared resource-path resolution, note coloring, and the theme palette switch."""
 
 from pathlib import Path
 
 import pytest
 
-from utils.common import CHANNEL_COLORS, channel_color_hex, note_color_hex, resource_path
+from utils.common import (
+    CHANNEL_COLORS,
+    Colors,
+    apply_theme,
+    channel_color_hex,
+    current_theme,
+    note_color_hex,
+    resource_path,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -61,3 +69,40 @@ def test_note_color_hex_drum_is_constant_regardless_of_track() -> None:
 def test_note_color_hex_drum_color_never_used_for_pitched_tracks() -> None:
     drum_color = note_color_hex(0, is_drum=True)
     assert all(note_color_hex(track, is_drum=False) != drum_color for track in range(30))
+
+
+@pytest.fixture(autouse=True)
+def _reset_theme():
+    yield
+    apply_theme("dark")
+
+
+def test_default_theme_is_dark() -> None:
+    assert current_theme() == "dark"
+
+
+def test_apply_theme_updates_current_theme() -> None:
+    apply_theme("light")
+    assert current_theme() == "light"
+
+
+def test_apply_theme_mutates_variant_members_in_place() -> None:
+    background_before = Colors.BACKGROUND.value
+    apply_theme("light")
+    assert Colors.BACKGROUND.value is background_before
+    assert Colors.BACKGROUND.value.hex != "#111111"
+    apply_theme("dark")
+    assert Colors.BACKGROUND.value.hex == "#111111"
+
+
+def test_apply_theme_leaves_invariant_members_unchanged() -> None:
+    accent_before = Colors.ACCENT_1.value.hex
+    black_before = Colors.BLACK.value.hex
+    apply_theme("light")
+    assert Colors.ACCENT_1.value.hex == accent_before
+    assert Colors.BLACK.value.hex == black_before
+
+
+def test_apply_theme_keeps_qcolor_in_sync_with_hex() -> None:
+    apply_theme("light")
+    assert Colors.WHITE.value.qcolor.name().lower() == Colors.WHITE.value.hex.lower()

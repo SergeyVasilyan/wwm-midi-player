@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
+from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QColor
 
 
@@ -64,7 +65,17 @@ class Color:
         self.qcolor = QColor(self.hex)
 
 class Colors(Enum):
-    """Global colors enumeration."""
+    """Global colors enumeration.
+
+    WHITE/BACKGROUND/BACKGROUND_1/BACKGROUND_2/TEXT_MUTED are theme-dependent
+    (see _PALETTES/apply_theme below) - their stored value is mutated in
+    place when the theme switches, so every existing `Colors.X.value.hex`/
+    `.qcolor` read stays correct without call sites needing to change. The
+    remaining members are intentionally invariant across themes (either
+    already fine on both backgrounds, like ACCENT_1/RED, or meaning a true
+    black/white that must never flip, like BLACK's use as a universal
+    "darken on press" overlay tint).
+    """
 
     ACCENT_1 = Color("#2E7D32")
     ACCENT_2 = Color("#8D6E63")
@@ -76,6 +87,105 @@ class Colors(Enum):
     BLUE = Color("#0000FF")
     BLACK = Color("#000000")
     WHITE = Color("#FFFFFF")
+    TEXT_MUTED = Color("#999999")
+
+# Theme-dependent members' values per theme name; members not listed here
+# (ACCENT_1, ACCENT_2, RED, GREEN, BLUE, BLACK) stay constant across themes.
+_PALETTES: dict[str, dict[str, str]] = {
+    "dark": {
+        "WHITE": "#FFFFFF",
+        "BACKGROUND": "#111111",
+        "BACKGROUND_1": "#101010",
+        "BACKGROUND_2": "#2A2A2A",
+        "TEXT_MUTED": "#999999",
+    },
+    "light": {
+        "WHITE": "#1A1A1A",
+        "BACKGROUND": "#F0F0F0",
+        "BACKGROUND_1": "#FFFFFF",
+        "BACKGROUND_2": "#D0D0D0",
+        "TEXT_MUTED": "#666666",
+    },
+}
+
+_current_theme: str = "dark"
+
+
+class _ThemeBus(QObject):
+    """Signal bus notifying widgets to restyle after a theme switch."""
+
+    changed: Signal = Signal()
+
+
+theme_bus: _ThemeBus = _ThemeBus()
+
+
+def current_theme() -> str:
+    """Return the name of the currently active theme.
+
+    Returns:
+        "dark" or "light".
+    """
+    return _current_theme
+
+
+def apply_theme(name: str) -> None:
+    """Switch the active theme, mutating theme-dependent Colors members in place.
+
+    Every `Colors.X.value.hex`/`.qcolor` read across the codebase reflects
+    the new palette immediately after this call, since it's the same
+    `Color` instance being mutated rather than replaced. Emits
+    `theme_bus.changed` afterward so live widgets can restyle/repaint.
+
+    Args:
+        name: The theme to switch to, "dark" or "light".
+    """
+    global _current_theme
+    palette: dict[str, str] = _PALETTES[name]
+    for member in Colors:
+        if member.name in palette:
+            hex_value: str = palette[member.name]
+            member.value.hex = hex_value
+            member.value.qcolor = QColor(hex_value)
+    _current_theme = name
+    theme_bus.changed.emit()
+
+
+def scrollbar_qss() -> str:
+    """Return QSS for a slim, theme-matched vertical scrollbar.
+
+    A function (not a constant) since it reads theme-dependent Colors
+    values that must be re-evaluated after a theme switch, not baked in
+    once at import time. Appended to a scrollable widget's own stylesheet
+    wherever it needs one - there's no default styling otherwise, which
+    leaves the OS's native scrollbar clashing with the app's own chrome.
+
+    Returns:
+        A QSS block targeting QScrollBar:vertical and its sub-controls.
+    """
+    return f"""
+        QScrollBar:vertical {{
+            background: transparent;
+            width: 10px;
+            margin: 2px 2px 2px 0px;
+        }}
+        QScrollBar::handle:vertical {{
+            background: {Colors.BACKGROUND_2.value.hex};
+            border-radius: 4px;
+            min-height: 24px;
+        }}
+        QScrollBar::handle:vertical:hover {{
+            background: {Colors.ACCENT_1.value.hex};
+        }}
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+            height: 0px;
+            border: none;
+            background: none;
+        }}
+        QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
+            background: none;
+        }}
+    """
 
 # Falling-note colors for the piano visualizer, one per MIDI channel (0-15).
 # Index 9 (the GM percussion channel) gets a distinct silver/grey so drum hits

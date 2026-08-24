@@ -12,7 +12,7 @@ from ui.buttons.shuffle import ShuffleButton
 from ui.progressbar import ProgressBar
 from ui.toggle_switch import ToggleSwitch
 from ui.volume_slider import Volume
-from utils.common import SPACING_MD, SPACING_SM, Colors
+from utils.common import SPACING_MD, SPACING_SM, Colors, theme_bus
 
 # Fixed width shared by both the title/artist column and the volume/mode
 # column: long track/artist names elide instead of growing the left side,
@@ -33,22 +33,16 @@ class NowPlayingBar(QFrame):
             parent: Optional parent widget.
         """
         super().__init__(parent=parent)
+        self.__caption_labels: list[QLabel] = []
         self.__title_label: QLabel = QLabel("No files loaded")
-        self.__title_label.setStyleSheet(
-            f"font-weight: bold; font-size: 16px; background: transparent; "
-            f"color: {Colors.WHITE.value.hex};")
         self.__title_label.setFixedWidth(SIDE_COLUMN_WIDTH)
         self.__artist_label: QLabel = QLabel("")
-        self.__artist_label.setStyleSheet(
-            "color: #999999; font-size: 12px; background: transparent;")
         self.__artist_label.setFixedWidth(SIDE_COLUMN_WIDTH)
         self.__artist_label.setVisible(False)
         self.__progressbar: ProgressBar = ProgressBar()
         self.__current_seconds: int = 0
         self.__duration_seconds: int = 0
         self.__time_label: QLabel = QLabel("00:00 / 00:00")
-        self.__time_label.setStyleSheet(
-            f"font-weight: bold; background: transparent; color: {Colors.WHITE.value.hex};")
         self.__shuffle_button: ShuffleButton = ShuffleButton()
         self.__previous_button: PreviousButton = PreviousButton()
         self.__play_button: PlayButton = PlayButton()
@@ -62,6 +56,9 @@ class NowPlayingBar(QFrame):
         self.__construct_layout()
         self.__progressbar.seek_requested.connect(self.seek_requested)
         self.set_style()
+        self.__style_labels()
+        theme_bus.changed.connect(self.set_style)
+        theme_bus.changed.connect(self.__style_labels)
 
     @property
     def play_button(self) -> PlayButton:
@@ -252,8 +249,7 @@ class NowPlayingBar(QFrame):
         layout.addLayout(self.__construct_progress_row())
         return layout
 
-    @staticmethod
-    def __make_caption_label(text: str) -> QLabel:
+    def __make_caption_label(self, text: str) -> QLabel:
         """Construct a small caption label with readable contrast on the dark panel.
 
         Args:
@@ -263,7 +259,7 @@ class NowPlayingBar(QFrame):
             The constructed caption label.
         """
         label: QLabel = QLabel(text)
-        label.setStyleSheet(f"color: {Colors.WHITE.value.hex}; background: transparent;")
+        self.__caption_labels.append(label)
         return label
 
     def __construct_right_column(self) -> QWidget:
@@ -297,6 +293,10 @@ class NowPlayingBar(QFrame):
         container: QWidget = QWidget()
         container.setLayout(outer)
         container.setFixedWidth(SIDE_COLUMN_WIDTH)
+        # Qt's default style can paint a plain QWidget's background using a
+        # native palette role rather than leaving it transparent - explicit
+        # here so it doesn't show a seam against the parent frame's own fill.
+        container.setStyleSheet("background: transparent;")
         return container
 
     def __construct_layout(self) -> None:
@@ -316,6 +316,18 @@ class NowPlayingBar(QFrame):
                 border-top: 1px solid {Colors.BACKGROUND_2.value.hex};
             }}
         """)
+
+    def __style_labels(self) -> None:
+        """(Re)apply theme-dependent colors to every plain-text label in the bar."""
+        self.__title_label.setStyleSheet(
+            f"font-weight: bold; font-size: 16px; background: transparent; "
+            f"color: {Colors.WHITE.value.hex};")
+        self.__artist_label.setStyleSheet(
+            f"color: {Colors.TEXT_MUTED.value.hex}; font-size: 12px; background: transparent;")
+        self.__time_label.setStyleSheet(
+            f"font-weight: bold; background: transparent; color: {Colors.WHITE.value.hex};")
+        for label in self.__caption_labels:
+            label.setStyleSheet(f"color: {Colors.WHITE.value.hex}; background: transparent;")
 
 if __name__ == "__main__":
     ...

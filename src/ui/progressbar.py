@@ -15,7 +15,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QProgressBar, QWidget
 
 from ui.animation import AnimatedProgress
-from utils.common import Colors
+from utils.common import Colors, theme_bus
 
 HIT_AREA_HEIGHT = 18
 TRACK_HEIGHT = 6
@@ -48,6 +48,7 @@ class ProgressBar(QProgressBar):
         self.__fill: AnimatedProgress = AnimatedProgress(
             self, self.__on_fill_changed, FILL_ANIMATION_DURATION_MS,
             easing=QEasingCurve.Type.Linear)
+        theme_bus.changed.connect(self.update)
 
     def __on_reveal_changed(self, _value: float) -> None:
         """Repaint as the thumb-reveal animation progresses.

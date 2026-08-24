@@ -16,7 +16,7 @@ from PySide6.QtCore import (
 from PySide6.QtGui import QColor, QPainter, QPaintEvent
 from PySide6.QtWidgets import QAbstractButton, QWidget
 
-from utils.common import Colors
+from utils.common import Colors, theme_bus
 
 
 class ToggleSwitch(QAbstractButton):
@@ -33,8 +33,9 @@ class ToggleSwitch(QAbstractButton):
         super().__init__(parent=parent)
         self.setCheckable(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        # ACCENT_1 is invariant across themes so caching it is safe; BACKGROUND_2
+        # is theme-dependent and is read fresh in paintEvent instead (see below).
         self.__checked_color: QColor = Colors.ACCENT_1.value.qcolor
-        self.__unchecked_color: QColor = Colors.BACKGROUND_2.value.qcolor
         self.__knob_color: QColor = QColor("#FFFFFF")
         self.__width: int = 45
         self.__height: int = int(self.__width * .52)
@@ -51,6 +52,7 @@ class ToggleSwitch(QAbstractButton):
         self.__animation.setDuration(250)
         self.__animation.setEasingCurve(QEasingCurve.Type.InOutCubic)
         self.toggled.connect(self.__start_animation)
+        theme_bus.changed.connect(self.update)
 
     @Property(float, notify=__position_changed)
     def position(self) -> float:
@@ -106,7 +108,8 @@ class ToggleSwitch(QAbstractButton):
         painter: QPainter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         track_rect: QRect = QRect(0, 0, self.width(), self.height())
-        painter.setBrush(self.__checked_color if self.isChecked() else self.__unchecked_color)
+        unchecked_color: QColor = Colors.BACKGROUND_2.value.qcolor
+        painter.setBrush(self.__checked_color if self.isChecked() else unchecked_color)
         painter.setPen(Qt.PenStyle.NoPen)
         radius: int = self.__width // 4
         painter.drawRoundedRect(track_rect, radius, radius)

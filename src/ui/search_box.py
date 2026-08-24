@@ -1,16 +1,17 @@
-"""Pill-shaped search box with a hand-drawn magnifying-glass leading icon."""
+"""Pill-shaped search box with hand-drawn magnifying-glass and clear icons."""
 
 import math
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
+from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QLineEdit, QWidget
 
-from utils.common import SPACING_MD, Colors
+from utils.common import SPACING_MD, Colors, theme_bus
 
 ICON_SIZE = 14
 HANDLE_ANGLE_DEG = -45.0
 HANDLE_LENGTH_RATIO = 0.32
+CLEAR_GLYPH_MARGIN_RATIO = 0.2
 
 
 def _magnifier_pixmap(size: int, color: QColor) -> QPixmap:
@@ -51,20 +52,61 @@ def _magnifier_pixmap(size: int, color: QColor) -> QPixmap:
     return pixmap
 
 
+def _clear_pixmap(size: int, color: QColor) -> QPixmap:
+    """Render an "x" glyph to a transparent QPixmap, mirroring CloseButton's crossed-line glyph.
+
+    Args:
+        size: The pixmap's width and height in pixels.
+        color: The glyph's stroke color.
+
+    Returns:
+        A transparent square pixmap containing the rendered glyph.
+    """
+    pixmap: QPixmap = QPixmap(size, size)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter: QPainter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    pen: QPen = QPen(color)
+    pen.setWidthF(size * 0.11)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    painter.setPen(pen)
+    margin: float = size * CLEAR_GLYPH_MARGIN_RATIO
+    painter.drawLine(QPointF(margin, margin), QPointF(size - margin, size - margin))
+    painter.drawLine(QPointF(size - margin, margin), QPointF(margin, size - margin))
+    painter.end()
+    return pixmap
+
+
 class SearchBox(QLineEdit):
-    """Song-search input: pill shape, leading magnifying-glass icon."""
+    """Song-search input: pill shape, leading magnifying-glass icon, trailing clear icon."""
 
     def __init__(self, parent: QWidget|None=None) -> None:
-        """Initialize the search box, placeholder text, and leading icon.
+        """Initialize the search box, placeholder text, and leading/trailing icons.
 
         Args:
             parent: Optional parent widget.
         """
         super().__init__(parent=parent)
         self.setPlaceholderText("Search songs...")
-        icon: QIcon = QIcon(_magnifier_pixmap(ICON_SIZE, QColor(Colors.WHITE.value.hex)))
-        self.addAction(icon, QLineEdit.ActionPosition.LeadingPosition)
+        self.__magnifier_action: QAction = self.addAction(
+            QIcon(_magnifier_pixmap(ICON_SIZE, QColor(Colors.WHITE.value.hex))),
+            QLineEdit.ActionPosition.LeadingPosition)
+        self.__clear_action: QAction = self.addAction(
+            QIcon(_clear_pixmap(ICON_SIZE, QColor(Colors.TEXT_MUTED.value.hex))),
+            QLineEdit.ActionPosition.TrailingPosition)
+        self.__clear_action.setVisible(False)
+        self.__clear_action.triggered.connect(self.clear)
+        self.textChanged.connect(lambda text: self.__clear_action.setVisible(bool(text)))
         self.set_style()
+        theme_bus.changed.connect(self.set_style)
+        theme_bus.changed.connect(self.__refresh_icons)
+
+    def __refresh_icons(self) -> None:
+        """Regenerate the leading/trailing icon pixmaps after a theme switch."""
+        self.__magnifier_action.setIcon(
+            QIcon(_magnifier_pixmap(ICON_SIZE, QColor(Colors.WHITE.value.hex))))
+        self.__clear_action.setIcon(
+            QIcon(_clear_pixmap(ICON_SIZE, QColor(Colors.TEXT_MUTED.value.hex))))
 
     def set_style(self) -> None:
         """Apply pill-shaped QSS matching the app palette."""

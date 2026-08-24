@@ -7,7 +7,7 @@ from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QLinearGradient, QPainter, QPaintEvent, QPen
 from PySide6.QtWidgets import QWidget
 
-from utils.common import Colors, note_color_hex
+from utils.common import Colors, note_color_hex, theme_bus
 from utils.note_events import NoteEvent
 from utils.piano_layout import (
     MIDI_NOTE_MAX,
@@ -27,6 +27,13 @@ KEY_CORNER_RADIUS: float = 3.0
 BLACK_KEY_HEIGHT_RATIO: float = 0.62
 HIT_LINE_HEIGHT: float = 3.0
 
+# A piano's keys always look like a piano, regardless of app theme - these
+# are intentionally independent of Colors.WHITE/BLACK (which flip per theme).
+WHITE_KEY_TOP: str = "#FFFFFF"
+WHITE_KEY_BOTTOM: str = "#D8D8D8"
+BLACK_KEY_TOP: str = "#3A3A3A"
+BLACK_KEY_BOTTOM: str = "#000000"
+
 
 class PianoVisualizer(QWidget):
     """Draws an 88-key keyboard with falling note bars synced to playback position."""
@@ -38,6 +45,7 @@ class PianoVisualizer(QWidget):
             parent: Optional parent widget.
         """
         super().__init__(parent=parent)
+        theme_bus.changed.connect(self.update)
         self.__events: list[NoteEvent] = []
         self.__starts: list[float] = []
         self.__max_note_duration: float = 0.0
@@ -221,8 +229,8 @@ class PianoVisualizer(QWidget):
                 gradient.setColorAt(0.0, glow.lighter(150))
                 gradient.setColorAt(1.0, glow)
             else:
-                gradient.setColorAt(0.0, QColor(Colors.WHITE.value.hex))
-                gradient.setColorAt(1.0, QColor("#D8D8D8"))
+                gradient.setColorAt(0.0, QColor(WHITE_KEY_TOP))
+                gradient.setColorAt(1.0, QColor(WHITE_KEY_BOTTOM))
             painter.setBrush(QBrush(gradient))
             painter.drawRoundedRect(rect, KEY_CORNER_RADIUS, KEY_CORNER_RADIUS)
 
@@ -249,8 +257,8 @@ class PianoVisualizer(QWidget):
                 gradient.setColorAt(0.0, glow.lighter(140))
                 gradient.setColorAt(1.0, glow.darker(110))
             else:
-                gradient.setColorAt(0.0, QColor("#3A3A3A"))
-                gradient.setColorAt(1.0, QColor(Colors.BLACK.value.hex))
+                gradient.setColorAt(0.0, QColor(BLACK_KEY_TOP))
+                gradient.setColorAt(1.0, QColor(BLACK_KEY_BOTTOM))
             painter.setBrush(QBrush(gradient))
             painter.drawRoundedRect(rect, KEY_CORNER_RADIUS, KEY_CORNER_RADIUS)
 

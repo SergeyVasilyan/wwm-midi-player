@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
 )
 
 from ui.toggle_switch import ToggleSwitch
-from utils.common import RADIUS_MD, SPACING_SM, Colors, note_color_hex
+from utils.common import RADIUS_MD, SPACING_SM, Colors, note_color_hex, scrollbar_qss, theme_bus
 from utils.note_events import TrackSummary
 
 SWATCH_SIZE: int = 12
@@ -40,26 +40,14 @@ class _TrackRow(QWidget):
         swatch.setStyleSheet(
             f"background-color: {note_color_hex(track.index, track.is_drum)}; "
             f"border-radius: {SWATCH_SIZE // 2}px;")
-        name_label: QLabel = QLabel(track.name)
-        name_label.setStyleSheet(f"color: {Colors.WHITE.value.hex}; background: transparent;")
+        self.__name_label: QLabel = QLabel(track.name)
         self.__solo_button: QPushButton = QPushButton("S")
         self.__solo_button.setCheckable(True)
         self.__solo_button.setFixedSize(SOLO_BUTTON_SIZE, SOLO_BUTTON_SIZE)
         self.__solo_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.__solo_button.setToolTip("Solo: mute every other track")
-        self.__solo_button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {Colors.BACKGROUND_2.value.hex};
-                color: #999999;
-                border: none;
-                border-radius: {SOLO_BUTTON_SIZE // 2}px;
-                font-weight: bold;
-            }}
-            QPushButton:checked {{
-                background-color: #E5A93E;
-                color: {Colors.BACKGROUND.value.hex};
-            }}
-        """)
+        self.__style()
+        theme_bus.changed.connect(self.__style)
         # clicked (not toggled) fires only on user interaction, not on the
         # programmatic set_soloed()/set_muted() below - so we never need to
         # block signals to push panel-driven state back into a row.
@@ -72,9 +60,27 @@ class _TrackRow(QWidget):
         layout: QHBoxLayout = QHBoxLayout(self)
         layout.setContentsMargins(SPACING_SM, SPACING_SM // 2, SPACING_SM, SPACING_SM // 2)
         layout.addWidget(swatch)
-        layout.addWidget(name_label, stretch=1)
+        layout.addWidget(self.__name_label, stretch=1)
         layout.addWidget(self.__solo_button)
         layout.addWidget(self.__switch)
+
+    def __style(self) -> None:
+        """Apply theme-dependent colors to the name label and solo button."""
+        self.__name_label.setStyleSheet(
+            f"color: {Colors.WHITE.value.hex}; background: transparent;")
+        self.__solo_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {Colors.BACKGROUND_2.value.hex};
+                color: {Colors.TEXT_MUTED.value.hex};
+                border: none;
+                border-radius: {SOLO_BUTTON_SIZE // 2}px;
+                font-weight: bold;
+            }}
+            QPushButton:checked {{
+                background-color: #E5A93E;
+                color: {Colors.BACKGROUND.value.hex};
+            }}
+        """)
 
     def set_muted(self, muted: bool) -> None:
         """Reflect external mute state (e.g. from a solo elsewhere) without emitting toggled.
@@ -114,6 +120,7 @@ class TrackListPanel(QFrame):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.__widget)
         self.__set_style()
+        theme_bus.changed.connect(self.__set_style)
 
     def load_tracks(self, tracks: list[TrackSummary]) -> None:
         """Clear and rebuild one row per track, in ascending track-index order.
@@ -165,8 +172,9 @@ class TrackListPanel(QFrame):
                 border: 1px solid {Colors.BACKGROUND.value.hex};
             }}
         """)
-        self.__widget.setStyleSheet("""
-            QListWidget { background-color: transparent; border: none; outline: 0; }
+        self.__widget.setStyleSheet(f"""
+            QListWidget {{ background-color: transparent; border: none; outline: 0; }}
+            {scrollbar_qss()}
         """)
 
 if __name__ == "__main__":
